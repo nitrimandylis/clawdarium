@@ -62,11 +62,11 @@ clawdarium swimming at http://localhost:4550
 
 ## 📸 Evidence
 
-![the tank](.github/tank.gif)
+<img src=".github/tank.gif" alt="the tank" width="100%">
 
 *the tank, live. six crabs locally, five on pages.*
 
-![pearl](.github/pearl.gif)
+<img src=".github/pearl.gif" alt="pearl" width="100%">
 
 *the pearl scene: 168 deterministic frames, rendered in any order.*
 
