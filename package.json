@@ -6,6 +6,7 @@
   "scripts": {
     "build": "bun build.ts",
     "render": "bun render.ts",
+    "check": "bun check.ts",
     "serve": "bun serve.ts"
   },
   "devDependencies": {
