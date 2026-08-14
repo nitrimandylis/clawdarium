@@ -162,10 +162,11 @@ function drawTitle() {
 }
 
 // ─── CRABS ───────────────────────────────────────────────────
-// depth lanes in half rows; feet land on the sand slope (rows 27/29/31)
-const LANES = [46, 50, 54];
+// depth lanes in half rows; feet land on the sand slope (rows 27/30/32)
+const LANES = [46, 52, 56];
 const X_MIN = (INNER_L + 1) * 2, X_MAX = INNER_R * 2 - CLAWD.width - 2;
 const TERRITORY = 9;      // how far a crab wanders from home, in half cells
+const SEP = 12;           // min gap between crab left-edges before they repel
 
 function spawnCrab(name: string, dir: string, i: number, total: number) {
   // homes are spread evenly across the sand so the tank never bunches up
@@ -182,16 +183,45 @@ function spawnCrab(name: string, dir: string, i: number, total: number) {
   });
 }
 
+// pick the candidate spot in the territory that keeps the most distance
+// from where everyone else is headed
+function pickTarget(c: Crab): number {
+  let best = c.home, bestGap = -1;
+  for (let t = 0; t < 6; t++) {
+    const cand = Math.max(X_MIN, Math.min(X_MAX,
+      c.home + (Math.random() * 2 - 1) * TERRITORY));
+    let gap = Infinity;
+    for (const o of crabs) if (o !== c) gap = Math.min(gap, Math.abs(cand - o.target));
+    if (gap > bestGap) { bestGap = gap; best = cand; }
+  }
+  return best;
+}
+
 function updateCrab(c: Crab, sec: number, dt: number) {
   if (sec < c.restUntil) return;
   if (Math.abs(c.x - c.target) < 0.4) {
     // arrived: rest a while, then pick a new spot inside the territory
     c.restUntil = sec + 1.5 + Math.random() * 4;
-    c.target = Math.max(X_MIN, Math.min(X_MAX,
-      c.home + (Math.random() * 2 - 1) * TERRITORY));
+    c.target = pickTarget(c);
     return;
   }
   c.x += Math.sign(c.target - c.x) * c.speed * dt;
+}
+
+// crabs that get too close push each other apart, so they pass and jostle
+// instead of stacking into one many-eyed blob
+function separate(dt: number) {
+  for (let i = 0; i < crabs.length; i++)
+    for (let j = i + 1; j < crabs.length; j++) {
+      const a = crabs[i], b = crabs[j];
+      const d = a.x - b.x;
+      const gap = Math.abs(d);
+      if (gap >= SEP) continue;
+      const push = (SEP - gap) * 1.5 * dt;
+      const dir = d === 0 ? 1 : Math.sign(d);
+      a.x = Math.max(X_MIN, Math.min(X_MAX, a.x + dir * push));
+      b.x = Math.max(X_MIN, Math.min(X_MAX, b.x - dir * push));
+    }
 }
 
 // the clawd sprite at half scale, on the half grid
@@ -241,6 +271,7 @@ function frame(ts: number) {
   drawFish(sec);
   drawSand();
   for (const c of crabs) updateCrab(c, sec, dt);
+  separate(dt);
   for (const c of [...crabs].sort((a, b) => a.y - b.y)) drawCrab(c, sec);
   drawBubbles(sec);
   drawTitle();
