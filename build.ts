@@ -10,16 +10,31 @@
 
 import { Glob } from 'bun';
 import { mkdirSync } from 'node:fs';
+import { CLAWD } from './engine/engine';
 
 const DIR = import.meta.dir;
 
-function shell(title: string, js: string) {
+// the favicon is the canonical sprite itself, so it can never drift from him
+function faviconSvg(): string {
+  let body = '';
+  for (let r = 0; r < CLAWD.height; r++)
+    for (let c = 0; c < CLAWD.width; c++)
+      if (CLAWD.data[r][c]) body += `<rect x="${c + 1}" y="${r + 4}" width="1" height="1"/>`;
+  const eyes =
+    `<rect x="${CLAWD.eyeLeft.x + 1}" y="${CLAWD.eyeLeft.y + 4}" width="1" height="1"/>` +
+    `<rect x="${CLAWD.eyeRight.x + 1}" y="${CLAWD.eyeRight.y + 4}" width="1" height="1"/>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges">`
+    + `<g fill="${CLAWD.body}">${body}</g><g fill="${CLAWD.eye}">${eyes}</g></svg>`;
+}
+
+function shell(title: string, js: string, icon: string) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${title}</title>
+<link rel="icon" href="${icon}" type="image/svg+xml">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -55,11 +70,12 @@ async function bundle(entry: string): Promise<string> {
 
 async function buildScenes(srcDir: string, outDir: string) {
   const names: string[] = [];
+  const icon = outDir.endsWith('private') ? '../favicon.svg' : 'favicon.svg';
   mkdirSync(outDir, { recursive: true });
   for (const file of new Glob('*.ts').scanSync(srcDir)) {
     const name = file.replace('.ts', '');
     const js = await bundle(`${srcDir}/${file}`);
-    await Bun.write(`${outDir}/${name}.html`, shell(`clawdarium · ${name}`, js));
+    await Bun.write(`${outDir}/${name}.html`, shell(`clawdarium · ${name}`, js, icon));
     names.push(name);
     console.log(`built ${name}.html`);
   }
@@ -70,6 +86,8 @@ async function buildScenes(srcDir: string, outDir: string) {
 
 const publicScenes = await buildScenes(`${DIR}/scenes`, `${DIR}/docs`);
 const privateScenes = await buildScenes(`${DIR}/scenes/private`, `${DIR}/docs/private`);
+
+await Bun.write(`${DIR}/docs/favicon.svg`, faviconSvg());
 
 // the tank: hub/shell.html carries the page, the bundled tank.ts goes inline
 const tankJs = await bundle(`${DIR}/hub/tank.ts`);
