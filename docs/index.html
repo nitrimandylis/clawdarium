@@ -167,28 +167,6 @@ var CLAWD = {
   eyeLeft: { x: 4, y: 1 },
   eyeRight: { x: 9, y: 1 }
 };
-var EYE_OFFSET = {
-  forward: { dx: 0, dy: 0 },
-  look_right: { dx: 1, dy: 0 },
-  look_left: { dx: -1, dy: 0 },
-  look_up: { dx: 0, dy: -1 },
-  look_down: { dx: 0, dy: 1 }
-};
-function drawClawd(ox, oy, opts = {}) {
-  const body = opts.body || CLAWD.body;
-  const a = opts.alpha;
-  for (let r = 0;r < CLAWD.height; r++)
-    for (let c = 0;c < CLAWD.width; c++)
-      if (CLAWD.data[r][c])
-        px(ox + c, oy + r, body, a);
-  const eyes = opts.eyes || "forward";
-  if (eyes === "blink")
-    return;
-  const o = EYE_OFFSET[eyes];
-  if (!opts.eyeCoverL)
-    px(ox + CLAWD.eyeLeft.x + o.dx, oy + CLAWD.eyeLeft.y + o.dy, CLAWD.eye, a);
-  px(ox + CLAWD.eyeRight.x + o.dx, oy + CLAWD.eyeRight.y + o.dy, CLAWD.eye, a);
-}
 var GLYPHS = {
   A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001", "00000", "00000"],
   B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110", "00000", "00000"],
@@ -384,20 +362,21 @@ function drawTitle() {
   drawText("CLAWDARIUM", 6, SIZE / 2 + 6, 1.2 * PX + 6, WATER.tagShadow, 0.5);
   drawText("CLAWDARIUM", 6, SIZE / 2, 1.2 * PX, WATER.title, 0.9);
 }
-var LANES = [19, 21, 23];
-var X_MIN = INNER_L + 1;
-var X_MAX = INNER_R - CLAWD.width;
-function spawnCrab(name, dir, i) {
-  const lane = LANES[i % LANES.length];
-  const x = X_MIN + rnd(i * 31 + 5) * (X_MAX - X_MIN);
+var LANES = [46, 50, 54];
+var X_MIN = (INNER_L + 1) * 2;
+var X_MAX = INNER_R * 2 - CLAWD.width - 2;
+var TERRITORY = 9;
+function spawnCrab(name, dir, i, total) {
+  const home = X_MIN + (i + 0.5) * (X_MAX - X_MIN) / total + (rnd(i * 31 + 5) - 0.5) * 4;
   crabs.push({
     name,
     dir,
     label: name.replace(/^gossip-/, "").replace(/-/g, " ").toUpperCase(),
-    x,
-    y: lane,
-    target: x,
-    speed: 2.2 + rnd(i * 17) * 1.4,
+    x: home,
+    y: LANES[i % LANES.length],
+    home,
+    target: home,
+    speed: 4 + rnd(i * 17) * 2.5,
     restUntil: rnd(i * 7) * 4,
     seed: i * 97 + 13
   });
@@ -405,31 +384,37 @@ function spawnCrab(name, dir, i) {
 function updateCrab(c, sec, dt) {
   if (sec < c.restUntil)
     return;
-  if (Math.abs(c.x - c.target) < 0.3) {
+  if (Math.abs(c.x - c.target) < 0.4) {
     c.restUntil = sec + 1.5 + Math.random() * 4;
-    c.target = X_MIN + Math.random() * (X_MAX - X_MIN);
+    c.target = Math.max(X_MIN, Math.min(X_MAX, c.home + (Math.random() * 2 - 1) * TERRITORY));
     return;
   }
   c.x += Math.sign(c.target - c.x) * c.speed * dt;
 }
+function drawClawdHalf(hx, hy, body, eyes) {
+  for (let r = 0;r < CLAWD.height; r++)
+    for (let col = 0;col < CLAWD.width; col++)
+      if (CLAWD.data[r][col])
+        pxh(hx + col, hy + r, body);
+  if (eyes === "blink")
+    return;
+  const off = eyes === "look_right" ? { dx: 1, dy: 0 } : eyes === "look_left" ? { dx: -1, dy: 0 } : eyes === "look_up" ? { dx: 0, dy: -1 } : { dx: 0, dy: 0 };
+  pxh(hx + CLAWD.eyeLeft.x + off.dx, hy + CLAWD.eyeLeft.y + off.dy, CLAWD.eye);
+  pxh(hx + CLAWD.eyeRight.x + off.dx, hy + CLAWD.eyeRight.y + off.dy, CLAWD.eye);
+}
 function drawCrab(c, sec) {
-  const walking = sec >= c.restUntil && Math.abs(c.x - c.target) >= 0.3;
+  const walking = sec >= c.restUntil && Math.abs(c.x - c.target) >= 0.4;
   const step = walking && Math.sin(sec * 9 + c.seed) > 0.3 ? -1 : 0;
   const blink = (sec * 24 + c.seed) % 90 >= 87;
   const eyes = blink ? "blink" : walking ? c.target > c.x ? "look_right" : "look_left" : c === hovered ? "look_up" : "forward";
   const depth = (LANES[LANES.length - 1] - c.y) / (LANES[LANES.length - 1] - LANES[0]);
-  const body = depth > 0 ? mix(CLAWD.body, WATER.bottom, depth * 0.38) : CLAWD.body;
-  drawClawd(Math.round(c.x), c.y + step, { eyes, body });
-}
-function drawTag(c) {
-  const cx = (Math.round(c.x) + CLAWD.width / 2) * PX;
-  const topY = (c.y - 2.4) * PX;
-  const w = textWidth(c.label, 4) + 24;
-  ctx2.fillStyle = WATER.tagShadow;
-  ctx2.globalAlpha = 0.85;
-  ctx2.fillRect(Math.round(cx - w / 2), topY - 10, w, 4 * 9 + 20);
-  ctx2.globalAlpha = 1;
-  drawText(c.label, 4, cx, topY, WATER.tagInk);
+  const body = depth > 0 ? mix(CLAWD.body, WATER.bottom, depth * 0.3) : CLAWD.body;
+  drawClawdHalf(Math.round(c.x), c.y + step, body, eyes);
+  const cx = (Math.round(c.x) + CLAWD.width / 2) * HP;
+  const topY = (c.y + CLAWD.height + 1.2) * HP;
+  const a = c === hovered ? 1 : 0.55;
+  drawText(c.label, 3, cx + 2, topY + 2, WATER.tagShadow, a * 0.8);
+  drawText(c.label, 3, cx, topY, WATER.tagInk, a);
 }
 var last = 0;
 function frame(ts) {
@@ -447,17 +432,15 @@ function frame(ts) {
   drawBubbles(sec);
   drawTitle();
   drawTankFrame();
-  if (hovered)
-    drawTag(hovered);
   if (running && !reduced)
     requestAnimationFrame(frame);
 }
 function crabAt(clientX, clientY) {
   const r = cv.getBoundingClientRect();
-  const gx = (clientX - r.left) / r.width * GW;
-  const gy = (clientY - r.top) / r.height * GH;
+  const gx = (clientX - r.left) / r.width * GW * 2;
+  const gy = (clientY - r.top) / r.height * GH * 2;
   for (const c of [...crabs].sort((a, b) => b.y - a.y)) {
-    if (gx >= c.x && gx <= c.x + CLAWD.width && gy >= c.y - 1 && gy <= c.y + CLAWD.height)
+    if (gx >= c.x - 1 && gx <= c.x + CLAWD.width + 1 && gy >= c.y - 2 && gy <= c.y + CLAWD.height + 5)
       return c;
   }
   return null;
@@ -519,8 +502,9 @@ async function scenesFrom(path) {
 }
 var pub = await scenesFrom("manifest.json");
 var priv = await scenesFrom("private/manifest.json");
-pub.forEach((n, i) => spawnCrab(n, "", i));
-priv.forEach((n, i) => spawnCrab(n, "private/", pub.length + i));
+var total = pub.length + priv.length;
+pub.forEach((n, i) => spawnCrab(n, "", i, total));
+priv.forEach((n, i) => spawnCrab(n, "private/", pub.length + i, total));
 var nav = document.getElementById("navlist");
 for (const c of crabs) {
   const li = document.createElement("li");

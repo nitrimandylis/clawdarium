@@ -9,8 +9,8 @@
 // state and use real randomness.
 
 import {
-  PX, SIZE, GW, GH, initCanvas, px, pxh, mix, rnd,
-  drawClawd, drawText, textWidth, CLAWD
+  PX, HP as HALF, SIZE, GW, GH, initCanvas, px, pxh, mix, rnd,
+  drawText, CLAWD
 } from '../engine/engine';
 
 const WATER = {
@@ -31,14 +31,18 @@ const WATERLINE = 3;      // first water row
 const SAND_TOP = 27;      // back edge of the sand
 const INNER_L = 1, INNER_R = GH - 2;   // inside the glass
 
+// Crabs live on the HALF grid at half scale (a body is 7×4 full cells), so
+// the tank reads as a tank rather than a crab crowd. Each crab keeps a home
+// territory it wanders around, which spreads them across the sand.
 interface Crab {
   name: string;
   label: string;
   dir: string;            // '' for public scenes, 'private/' for local ones
-  x: number;              // grid col, left edge of the body
-  y: number;              // grid row, fixed depth lane
+  x: number;              // half-grid col, left edge of the body
+  y: number;              // half-grid row, fixed depth lane
+  home: number;
   target: number;
-  speed: number;
+  speed: number;          // half cells per second
   restUntil: number;      // seconds; standing still until then
   seed: number;
 }
@@ -158,18 +162,21 @@ function drawTitle() {
 }
 
 // ─── CRABS ───────────────────────────────────────────────────
-// depth lanes: back crabs stand higher on the sand slope and draw first
-const LANES = [19, 21, 23];
-const X_MIN = INNER_L + 1, X_MAX = INNER_R - CLAWD.width;
+// depth lanes in half rows; feet land on the sand slope (rows 27/29/31)
+const LANES = [46, 50, 54];
+const X_MIN = (INNER_L + 1) * 2, X_MAX = INNER_R * 2 - CLAWD.width - 2;
+const TERRITORY = 9;      // how far a crab wanders from home, in half cells
 
-function spawnCrab(name: string, dir: string, i: number) {
-  const lane = LANES[i % LANES.length];
-  const x = X_MIN + rnd(i * 31 + 5) * (X_MAX - X_MIN);
+function spawnCrab(name: string, dir: string, i: number, total: number) {
+  // homes are spread evenly across the sand so the tank never bunches up
+  const home = X_MIN + (i + 0.5) * (X_MAX - X_MIN) / total
+    + (rnd(i * 31 + 5) - 0.5) * 4;
   crabs.push({
     name, dir,
     label: name.replace(/^gossip-/, '').replace(/-/g, ' ').toUpperCase(),
-    x, y: lane, target: x,
-    speed: 2.2 + rnd(i * 17) * 1.4,
+    x: home, y: LANES[i % LANES.length],
+    home, target: home,
+    speed: 4 + rnd(i * 17) * 2.5,
     restUntil: rnd(i * 7) * 4,
     seed: i * 97 + 13
   });
@@ -177,17 +184,31 @@ function spawnCrab(name: string, dir: string, i: number) {
 
 function updateCrab(c: Crab, sec: number, dt: number) {
   if (sec < c.restUntil) return;
-  if (Math.abs(c.x - c.target) < 0.3) {
-    // arrived: rest a while, then pick a new spot on the sand
+  if (Math.abs(c.x - c.target) < 0.4) {
+    // arrived: rest a while, then pick a new spot inside the territory
     c.restUntil = sec + 1.5 + Math.random() * 4;
-    c.target = X_MIN + Math.random() * (X_MAX - X_MIN);
+    c.target = Math.max(X_MIN, Math.min(X_MAX,
+      c.home + (Math.random() * 2 - 1) * TERRITORY));
     return;
   }
   c.x += Math.sign(c.target - c.x) * c.speed * dt;
 }
 
+// the clawd sprite at half scale, on the half grid
+function drawClawdHalf(hx: number, hy: number, body: string, eyes: string) {
+  for (let r = 0; r < CLAWD.height; r++)
+    for (let col = 0; col < CLAWD.width; col++)
+      if (CLAWD.data[r][col]) pxh(hx + col, hy + r, body);
+  if (eyes === 'blink') return;
+  const off = eyes === 'look_right' ? { dx: 1, dy: 0 }
+    : eyes === 'look_left' ? { dx: -1, dy: 0 }
+    : eyes === 'look_up' ? { dx: 0, dy: -1 } : { dx: 0, dy: 0 };
+  pxh(hx + CLAWD.eyeLeft.x + off.dx, hy + CLAWD.eyeLeft.y + off.dy, CLAWD.eye);
+  pxh(hx + CLAWD.eyeRight.x + off.dx, hy + CLAWD.eyeRight.y + off.dy, CLAWD.eye);
+}
+
 function drawCrab(c: Crab, sec: number) {
-  const walking = sec >= c.restUntil && Math.abs(c.x - c.target) >= 0.3;
+  const walking = sec >= c.restUntil && Math.abs(c.x - c.target) >= 0.4;
   const step = walking && Math.sin(sec * 9 + c.seed) > 0.3 ? -1 : 0;
   const blink = (sec * 24 + c.seed) % 90 >= 87;
   const eyes = blink ? 'blink'
@@ -196,19 +217,15 @@ function drawCrab(c: Crab, sec: number) {
   // back lanes sit deeper in the water: tint them toward it so two
   // overlapping crabs stay two crabs instead of one blob
   const depth = (LANES[LANES.length - 1] - c.y) / (LANES[LANES.length - 1] - LANES[0]);
-  const body = depth > 0 ? mix(CLAWD.body, WATER.bottom, depth * 0.38) : CLAWD.body;
-  drawClawd(Math.round(c.x), c.y + step, { eyes, body });
-}
+  const body = depth > 0 ? mix(CLAWD.body, WATER.bottom, depth * 0.30) : CLAWD.body;
+  drawClawdHalf(Math.round(c.x), c.y + step, body, eyes);
 
-function drawTag(c: Crab) {
-  const cx = (Math.round(c.x) + CLAWD.width / 2) * PX;
-  const topY = (c.y - 2.4) * PX;
-  const w = textWidth(c.label, 4) + 24;
-  ctx.fillStyle = WATER.tagShadow;
-  ctx.globalAlpha = 0.85;
-  ctx.fillRect(Math.round(cx - w / 2), topY - 10, w, 4 * 9 + 20);
-  ctx.globalAlpha = 1;
-  drawText(c.label, 4, cx, topY, WATER.tagInk);
+  // every crab wears its name, so picking the right one never needs a hover
+  const cx = (Math.round(c.x) + CLAWD.width / 2) * HALF;
+  const topY = (c.y + CLAWD.height + 1.2) * HALF;
+  const a = c === hovered ? 1 : 0.55;
+  drawText(c.label, 3, cx + 2, topY + 2, WATER.tagShadow, a * 0.8);
+  drawText(c.label, 3, cx, topY, WATER.tagInk, a);
 }
 
 // ─── LOOP ────────────────────────────────────────────────────
@@ -228,7 +245,6 @@ function frame(ts: number) {
   drawBubbles(sec);
   drawTitle();
   drawTankFrame();
-  if (hovered) drawTag(hovered);
 
   if (running && !reduced) requestAnimationFrame(frame);
 }
@@ -237,11 +253,12 @@ function frame(ts: number) {
 
 function crabAt(clientX: number, clientY: number): Crab | null {
   const r = cv.getBoundingClientRect();
-  const gx = (clientX - r.left) / r.width * GW;
-  const gy = (clientY - r.top) / r.height * GH;
-  // front-most first
+  const gx = (clientX - r.left) / r.width * GW * 2;    // half-grid coords
+  const gy = (clientY - r.top) / r.height * GH * 2;
+  // front-most first; the hitbox covers the body and the name label
   for (const c of [...crabs].sort((a, b) => b.y - a.y)) {
-    if (gx >= c.x && gx <= c.x + CLAWD.width && gy >= c.y - 1 && gy <= c.y + CLAWD.height)
+    if (gx >= c.x - 1 && gx <= c.x + CLAWD.width + 1
+      && gy >= c.y - 2 && gy <= c.y + CLAWD.height + 5)
       return c;
   }
   return null;
@@ -297,8 +314,9 @@ async function scenesFrom(path: string): Promise<string[]> {
 
 const pub = await scenesFrom('manifest.json');
 const priv = await scenesFrom('private/manifest.json');
-pub.forEach((n, i) => spawnCrab(n, '', i));
-priv.forEach((n, i) => spawnCrab(n, 'private/', pub.length + i));
+const total = pub.length + priv.length;
+pub.forEach((n, i) => spawnCrab(n, '', i, total));
+priv.forEach((n, i) => spawnCrab(n, 'private/', pub.length + i, total));
 
 // the accessible fallback: real links, one per animation
 const nav = document.getElementById('navlist')!;
