@@ -60,6 +60,16 @@ clawdarium swimming at http://localhost:4550
 | 05 | **render.ts** | replays each scene frame by frame in the playwright headless shell, then ffmpeg stitches the mp4 |
 | 06 | **docs/** | committed and served by github pages from main. no ci, the deploy step is `git push` |
 
+## 📸 Evidence
+
+![the tank](.github/tank.gif)
+
+*the tank, live. six crabs locally, five on pages.*
+
+![pearl](.github/pearl.gif)
+
+*the pearl scene: 168 deterministic frames, rendered in any order.*
+
 ## 🚀 Run it
 
 Needs [bun](https://bun.sh), ffmpeg, and the playwright headless shell for rendering.
