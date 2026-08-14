@@ -46,7 +46,7 @@ GitHub, which is why the public tank is one crab short.
 ```console
 nick@clawdarium:~$ bun serve.ts
 clawdarium swimming at http://localhost:4550
-[i] 5 crabs in the tank. one of them is not on github.
+[i] every crab accounted for. one of them is not on github.
 ```
 
 ## 🦀 The tank
