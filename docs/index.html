@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>clawdarium</title>
 <meta name="description" content="An aquarium for Clawd: every animation is a crab in the tank.">
+<meta property="og:title" content="clawdarium">
+<meta property="og:description" content="An aquarium for Clawd: every animation is a crab in the tank.">
+<meta property="og:image" content="https://nitrimandylis.github.io/clawdarium/og.png">
+<meta property="og:url" content="https://nitrimandylis.github.io/clawdarium/">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <style>
 /* Hallmark · route: custom (bespoke) · structure: one glowing tank in a dark room · idea: "all display type lives inside the canvas, drawn by the engine"
@@ -409,14 +414,15 @@ function updateCrab(c, sec, dt) {
   c.x += Math.sign(c.target - c.x) * c.speed * dt;
 }
 function separate(dt) {
+  const sep = Math.min(SEP, (X_MAX - X_MIN) / Math.max(1, crabs.length - 1));
   for (let i = 0;i < crabs.length; i++)
     for (let j = i + 1;j < crabs.length; j++) {
       const a = crabs[i], b = crabs[j];
       const d = a.x - b.x;
       const gap = Math.abs(d);
-      if (gap >= SEP)
+      if (gap >= sep)
         continue;
-      const push = (SEP - gap) * 1.5 * dt;
+      const push = (sep - gap) * 1.5 * dt;
       const dir = d === 0 ? 1 : Math.sign(d);
       a.x = Math.max(X_MIN, Math.min(X_MAX, a.x + dir * push));
       b.x = Math.max(X_MIN, Math.min(X_MAX, b.x - dir * push));

@@ -31,7 +31,16 @@ wandering a live pixel tank on GitHub Pages. Click a crab, watch its clip.
 - `gossip-overheard`, `gossip-telephone`, `gossip-the-board`,
   `gossip-collapse`: the four loosethreads promo clips, ported from the
   original clawd-gossip project.
+- `pearl`: Clawd taps a shell open and finds a pearl. The first
+  aquarium-native scene, made via the clawdarium skill flow.
 - `dione` (private, local only).
+
+## Checks
+
+- `bun run check` (check.ts): engine math asserts, then every built scene
+  renders frame 60, renders other frames, and renders frame 60 again; the
+  captures must be byte-identical. Guards the pure-render(f) contract that
+  the mp4 pipeline depends on.
 
 ## Where it's headed
 

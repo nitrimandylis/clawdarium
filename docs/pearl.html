@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>clawdarium · pearl</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #111;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden;
+    font-family: 'Courier New', monospace;
+  }
+  canvas { image-rendering: pixelated; width: min(92vh, 92vw); }
+  .info { color: #777; font-size: 11px; margin-top: 12px; letter-spacing: 2px; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1080"></canvas>
+<div class="info" id="info"></div>
+<script>
+// engine/engine.ts
+var PX = 30;
+var SIZE = 1080;
+var GW = SIZE / PX;
+var GH = SIZE / PX;
+var HP = PX / 2;
+var FPS = 24;
+var ctx;
+function px(gx, gy, col, a) {
+  if (gx < -2 || gy < -2 || gx > GW + 2 || gy > GH + 2)
+    return;
+  if (a !== undefined) {
+    if (a <= 0.02)
+      return;
+    ctx.globalAlpha = Math.min(1, a);
+  }
+  ctx.fillStyle = col;
+  ctx.fillRect(Math.round(gx) * PX, Math.round(gy) * PX, PX, PX);
+  if (a !== undefined)
+    ctx.globalAlpha = 1;
+}
+function pxh(hx, hy, col, a) {
+  if (a !== undefined) {
+    if (a <= 0.02)
+      return;
+    ctx.globalAlpha = Math.min(1, a);
+  }
+  ctx.fillStyle = col;
+  ctx.fillRect(Math.round(hx) * HP, Math.round(hy) * HP, HP, HP);
+  if (a !== undefined)
+    ctx.globalAlpha = 1;
+}
+function pxu(unit, ux, uy, col, a) {
+  if (a !== undefined) {
+    if (a <= 0.02)
+      return;
+    ctx.globalAlpha = Math.min(1, a);
+  }
+  ctx.fillStyle = col;
+  ctx.fillRect(Math.round(ux * unit), Math.round(uy * unit), unit, unit);
+  if (a !== undefined)
+    ctx.globalAlpha = 1;
+}
+function row(gy, col) {
+  ctx.fillStyle = col;
+  ctx.fillRect(0, gy * PX, SIZE, PX);
+}
+function rnd(seed) {
+  const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+function clamp(v, a, b) {
+  return v < a ? a : v > b ? b : v;
+}
+function easeOut(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+function easeInOut(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+function seg(f, a, b, ease) {
+  const t = clamp((f - a) / (b - a), 0, 1);
+  return ease ? ease(t) : t;
+}
+function mix(hexA, hexB, t) {
+  const pa = parseInt(hexA.slice(1), 16);
+  const pb = parseInt(hexB.slice(1), 16);
+  const r = Math.round(lerp(pa >> 16 & 255, pb >> 16 & 255, t));
+  const g = Math.round(lerp(pa >> 8 & 255, pb >> 8 & 255, t));
+  const b = Math.round(lerp(pa & 255, pb & 255, t));
+  return `rgb(${r},${g},${b})`;
+}
+var CLAWD = {
+  width: 14,
+  height: 8,
+  body: "#CD6E58",
+  eye: "#000000",
+  data: [
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0],
+    [0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
+  ],
+  eyeLeft: { x: 4, y: 1 },
+  eyeRight: { x: 9, y: 1 }
+};
+var EYE_OFFSET = {
+  forward: { dx: 0, dy: 0 },
+  look_right: { dx: 1, dy: 0 },
+  look_left: { dx: -1, dy: 0 },
+  look_up: { dx: 0, dy: -1 },
+  look_down: { dx: 0, dy: 1 }
+};
+function drawClawd(ox, oy, opts = {}) {
+  const body = opts.body || CLAWD.body;
+  const a = opts.alpha;
+  for (let r = 0;r < CLAWD.height; r++)
+    for (let c = 0;c < CLAWD.width; c++)
+      if (CLAWD.data[r][c])
+        px(ox + c, oy + r, body, a);
+  const eyes = opts.eyes || "forward";
+  if (eyes === "blink")
+    return;
+  const o = EYE_OFFSET[eyes];
+  if (!opts.eyeCoverL)
+    px(ox + CLAWD.eyeLeft.x + o.dx, oy + CLAWD.eyeLeft.y + o.dy, CLAWD.eye, a);
+  px(ox + CLAWD.eyeRight.x + o.dx, oy + CLAWD.eyeRight.y + o.dy, CLAWD.eye, a);
+}
+function bob(f, speed = 0.45) {
+  return Math.sin(f * speed) > 0.4 ? -1 : 0;
+}
+function burst(f, at, n, x, y, col, seed, life = 26) {
+  const age = f - at;
+  if (age < 0 || age > life)
+    return;
+  for (let i = 0;i < n; i++) {
+    const vx = (rnd(seed + i) - 0.5) * 0.55;
+    const vy = -rnd(seed + i * 2 + 99) * 0.5 - 0.16;
+    px(x + vx * age, y + vy * age + 0.011 * age * age, col, 1 - age / life);
+  }
+}
+function initCanvas(cv) {
+  ctx = cv.getContext("2d");
+  return ctx;
+}
+function run(scene) {
+  const cv = document.getElementById("c");
+  initCanvas(cv);
+  window.__renderFrame = (f) => {
+    ctx.globalAlpha = 1;
+    scene.render(f);
+  };
+  window.__TOTAL = scene.frames;
+  window.__FPS = FPS;
+  window.__NAME = scene.name;
+  window.__LOOPS = scene.loops || 1;
+  document.title = `clawdarium · ${scene.name}`;
+  if (scene.background)
+    document.body.style.background = scene.background;
+  if (window.__capture) {
+    cv.style.width = cv.width + "px";
+    window.__renderFrame(0);
+    return;
+  }
+  const dur = scene.frames / FPS;
+  const info = document.getElementById("info");
+  let start = null;
+  function loop(ts) {
+    if (start === null)
+      start = ts;
+    const elapsed = (ts - start) / 1000;
+    const f = Math.floor(elapsed % dur * FPS);
+    window.__renderFrame(f);
+    if (info)
+      info.textContent = `${scene.name} — ${(f / FPS).toFixed(1)}s / ${dur.toFixed(1)}s`;
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+
+// scenes/pearl.ts
+var P = {
+  waterTop: "#1a4a54",
+  waterBottom: "#0a2029",
+  sandHi: "#c8a86a",
+  sand: "#a8874e",
+  sandLow: "#7a5f33",
+  ray: "#9fd8cc",
+  foam: "#c8ece6",
+  shell: "#e8d8c2",
+  ridge: "#b99878",
+  lip: "#f2ccc1",
+  pearl: "#f6f2ea",
+  shine: "#ffffff"
+};
+var SAND_TOP = 28;
+var SHELL_X = 24;
+var SHELL_Y = SAND_TOP - 5;
+var SHELL_CLOSED = [
+  [0, 0, 1, 1, 1, 1, 0, 0],
+  [0, 1, 1, 1, 1, 1, 1, 0],
+  [1, 1, 2, 1, 1, 2, 1, 1],
+  [1, 2, 1, 1, 1, 1, 2, 1],
+  [1, 1, 1, 1, 1, 1, 1, 1]
+];
+var SHELL_OPEN = [
+  [0, 0, 1, 1, 1, 1, 0, 0],
+  [0, 1, 2, 1, 1, 2, 1, 0],
+  [1, 1, 1, 1, 1, 1, 1, 1],
+  [0, 3, 3, 5, 4, 3, 3, 0],
+  [0, 1, 1, 4, 4, 1, 1, 0],
+  [1, 1, 1, 1, 1, 1, 1, 1]
+];
+var OPEN_AT = 108;
+function drawWater(f) {
+  for (let gy = 0;gy < SAND_TOP; gy++)
+    row(gy, mix(P.waterTop, P.waterBottom, gy / (SAND_TOP - 1)));
+  for (const r of [9, 27]) {
+    const drift = Math.sin(f * 0.02 + r) * 1.5;
+    for (let gy = 1;gy < SAND_TOP; gy++) {
+      const gx = Math.round(r + drift + gy * 0.3);
+      const a = 0.08 * (1 - gy / SAND_TOP);
+      px(gx, gy, P.ray, a);
+      px(gx + 1, gy, P.ray, a * 0.6);
+    }
+  }
+  for (let k = 0;k < 5; k++) {
+    const col = 3 + rnd(k * 7 + 2) * 30;
+    const gy = SAND_TOP - 1 - (f * (0.1 + rnd(k) * 0.08) + rnd(k * 13) * 24) % 24;
+    pxh(col * 2, gy * 2, P.foam, 0.4 * Math.min(1, gy / 4));
+  }
+}
+function drawSand() {
+  for (let gy = SAND_TOP;gy < GH; gy++) {
+    const col = mix(P.sandHi, P.sand, (gy - SAND_TOP) / (GH - SAND_TOP));
+    for (let gx = 0;gx < GW; gx++) {
+      if (gy === SAND_TOP && rnd(gx * 7 + 1) > 0.6)
+        continue;
+      px(gx, gy, col);
+    }
+  }
+  for (let i = 0;i < 40; i++) {
+    const gx = Math.floor(rnd(i * 5 + 2) * GW);
+    const gy = SAND_TOP + 1 + Math.floor(rnd(i * 3 + 7) * (GH - SAND_TOP - 1));
+    px(gx, gy, rnd(i) > 0.5 ? P.sandLow : P.sandHi, 0.6);
+  }
+}
+function drawShell(f) {
+  const x = SHELL_X + (f >= 88 && f < OPEN_AT ? Math.round(Math.sin(f * 1.3)) : 0);
+  if (f < OPEN_AT) {
+    for (let r = 0;r < 5; r++)
+      for (let c = 0;c < 8; c++) {
+        const v = SHELL_CLOSED[r][c];
+        if (v)
+          px(x + c, SHELL_Y + r, v === 2 ? P.ridge : P.shell);
+      }
+    return;
+  }
+  const pearlA = seg(f, OPEN_AT, OPEN_AT + 10);
+  const y0 = SAND_TOP - 6;
+  for (let r = 0;r < 6; r++)
+    for (let c = 0;c < 8; c++) {
+      const v = SHELL_OPEN[r][c];
+      if (!v)
+        continue;
+      if (v === 4 || v === 5) {
+        px(x + c, y0 + r, P.lip);
+        px(x + c, y0 + r, v === 5 ? P.shine : P.pearl, pearlA);
+      } else {
+        px(x + c, y0 + r, v === 2 ? P.ridge : v === 3 ? P.lip : P.shell);
+      }
+    }
+}
+function drawGlint(f) {
+  for (const at of [122, 150]) {
+    const a = seg(f, at, at + 6) * (1 - seg(f, at + 8, at + 16));
+    if (a <= 0.02)
+      continue;
+    const cx = (SHELL_X + 4) * 30, cy = (SAND_TOP - 3.5) * 30;
+    for (let i = -2;i <= 2; i++) {
+      pxu(8, Math.round(cx / 8) + i, Math.round(cy / 8), P.shine, a * 0.9);
+      if (i !== 0)
+        pxu(8, Math.round(cx / 8), Math.round(cy / 8) + i, P.shine, a * 0.9);
+    }
+  }
+}
+run({
+  name: "pearl",
+  frames: 168,
+  background: "#0d1a20",
+  render(f) {
+    drawWater(f);
+    drawSand();
+    drawShell(f);
+    const enter = seg(f, 0, 36, easeOut);
+    const approach = seg(f, 52, 84, easeInOut);
+    let cx = Math.round(lerp(lerp(-15, 4, enter), 9, approach));
+    if (f >= 86 && f < 98)
+      cx += 1;
+    const notice = f >= 40 && f < 48 ? Math.round(Math.sin((f - 40) / 8 * Math.PI) * 1.5) : 0;
+    const joy = f >= 120 && f < 152 ? Math.round(Math.max(0, Math.sin((f - 120) * 0.45)) * 2) : 0;
+    const moving = f < 36 || f >= 52 && f < 84;
+    const cy = 20 + (moving ? bob(f) : 0) - notice - joy;
+    let eyes = f < 36 ? "forward" : "look_right";
+    if (f >= 158)
+      eyes = "forward";
+    if (f % 80 >= 76)
+      eyes = "blink";
+    drawClawd(cx, cy, { eyes });
+    if (f >= OPEN_AT)
+      burst(f, OPEN_AT, 8, SHELL_X + 4, SHELL_Y, P.shine, 33, 24);
+    drawGlint(f);
+  }
+});
+
+</script>
+</body>
+</html>

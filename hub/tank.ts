@@ -211,13 +211,16 @@ function updateCrab(c: Crab, sec: number, dt: number) {
 // crabs that get too close push each other apart, so they pass and jostle
 // instead of stacking into one many-eyed blob
 function separate(dt: number) {
+  // with many crabs the full gap can't physically fit; shrink it so the
+  // steering stays satisfiable instead of jittering at the glass
+  const sep = Math.min(SEP, (X_MAX - X_MIN) / Math.max(1, crabs.length - 1));
   for (let i = 0; i < crabs.length; i++)
     for (let j = i + 1; j < crabs.length; j++) {
       const a = crabs[i], b = crabs[j];
       const d = a.x - b.x;
       const gap = Math.abs(d);
-      if (gap >= SEP) continue;
-      const push = (SEP - gap) * 1.5 * dt;
+      if (gap >= sep) continue;
+      const push = (sep - gap) * 1.5 * dt;
       const dir = d === 0 ? 1 : Math.sign(d);
       a.x = Math.max(X_MIN, Math.min(X_MAX, a.x + dir * push));
       b.x = Math.max(X_MIN, Math.min(X_MAX, b.x - dir * push));
