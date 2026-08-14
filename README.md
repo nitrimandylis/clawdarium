@@ -64,7 +64,7 @@ clawdarium swimming at http://localhost:4550
 
 <img src=".github/tank.gif" alt="the tank" width="100%">
 
-*the tank, live. six crabs locally, five on pages.*
+*the tank where cute clawd lives*
 
 <img src=".github/pearl.gif" alt="pearl" width="100%">
 
