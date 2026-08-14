@@ -5,3 +5,6 @@ frames-*
 # personal scenes: build and render locally, never push
 scenes/private/
 docs/private/
+
+# hallmark skill bookkeeping, local only
+.hallmark/
