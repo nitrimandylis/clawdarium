@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>clawdarium</title>
+<meta name="description" content="An aquarium for Clawd — every animation is a crab in the tank.">
+<style>
+/* Hallmark · route: custom (bespoke) · structure: one glowing tank in a dark room · idea: "all display type lives inside the canvas, drawn by the engine"
+ * paper: oklch(15% 0.02 240) · accent: oklch(64% 0.13 30) · display: engine pixel font (in-canvas) · body: system-ui
+ * axes: dark / pixel-display / warm · genre: playful · nav: sr-only index (bespoke) · footer: single caption line (bespoke)
+ * Hallmark · pre-emit critique: P4 H4 E4 S5 R5 V5
+ */
+:root {
+  --color-room:   oklch(15% 0.02 240);
+  --color-ink:    oklch(93% 0.01 80);
+  --color-ink-2:  oklch(70% 0.02 220);
+  --color-accent: oklch(64% 0.13 30);
+  --color-rule:   oklch(30% 0.02 235);
+  --color-focus:  oklch(82% 0.10 80);
+  --color-scrim:  oklch(8% 0.02 240 / 0.82);
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --space-sm: 8px; --space-md: 16px; --space-lg: 32px;
+  --dur-fast: 140ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { overflow-x: clip; }
+body {
+  background: var(--color-room);
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  min-height: 100svh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+}
+canvas {
+  image-rendering: pixelated;
+  width: min(92svh, 94vw);
+  max-width: 900px;
+  display: block;
+}
+.caption {
+  color: var(--color-ink-2);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+.caption b { color: var(--color-accent); font-weight: 600; }
+.sr-nav {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: clip;
+  clip-path: inset(50%);
+}
+.sr-nav a:focus-visible {
+  position: fixed; inset: auto auto var(--space-md) var(--space-md);
+  width: auto; height: auto;
+  background: var(--color-room);
+  color: var(--color-ink);
+  padding: var(--space-sm) var(--space-md);
+  outline: 2px solid var(--color-focus);
+}
+.overlay {
+  position: fixed; inset: 0;
+  background: var(--color-scrim);
+  display: flex; align-items: center; justify-content: center;
+}
+.overlay[hidden] { display: none; }
+.overlay iframe {
+  width: min(92svh, 94vw);
+  aspect-ratio: 1;
+  border: 1px solid var(--color-rule);
+  background: var(--color-room);
+}
+.overlay button {
+  position: absolute;
+  top: var(--space-md); right: var(--space-md);
+  width: 44px; height: 44px;
+  background: var(--color-room);
+  color: var(--color-ink);
+  border: 1px solid var(--color-rule);
+  font-size: 1.2rem; line-height: 1;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.overlay button:hover { border-color: var(--color-accent); }
+.overlay button:active { transform: translateY(1px); }
+.overlay button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .overlay button { transition: none; }
+}
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1080" aria-label="A pixel aquarium. Each crab is one animation — click a crab to watch its clip."></canvas>
+<p class="caption">an aquarium for <b>clawd</b> · <span id="count">filling the tank…</span></p>
+<nav class="sr-nav" aria-label="Animations"><ul id="navlist"></ul></nav>
+<div class="overlay" id="overlay" hidden>
+  <button type="button" aria-label="Close animation">×</button>
+  <iframe title=""></iframe>
+</div>
+<script type="module">
+<!--JS-->
+</script>
+</body>
+</html>

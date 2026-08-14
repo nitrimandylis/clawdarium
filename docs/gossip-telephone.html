@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>clawdarium · gossip-telephone</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #111;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden;
+    font-family: 'Courier New', monospace;
+  }
+  canvas { image-rendering: pixelated; width: min(92vh, 92vw); }
+  .info { color: #777; font-size: 11px; margin-top: 12px; letter-spacing: 2px; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1080"></canvas>
+<div class="info" id="info"></div>
+<script>
+// engine/engine.ts
+var PX = 30;
+var SIZE = 1080;
+var GW = SIZE / PX;
+var GH = SIZE / PX;
+var HP = PX / 2;
+var FPS = 24;
+var ctx;
+function px(gx, gy, col, a) {
+  if (gx < -2 || gy < -2 || gx > GW + 2 || gy > GH + 2)
+    return;
+  if (a !== undefined) {
+    if (a <= 0.02)
+      return;
+    ctx.globalAlpha = Math.min(1, a);
+  }
+  ctx.fillStyle = col;
+  ctx.fillRect(Math.round(gx) * PX, Math.round(gy) * PX, PX, PX);
+  if (a !== undefined)
+    ctx.globalAlpha = 1;
+}
+function rnd(seed) {
+  const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+function clamp(v, a, b) {
+  return v < a ? a : v > b ? b : v;
+}
+function easeOut(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+function easeInOut(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+function seg(f, a, b, ease) {
+  const t = clamp((f - a) / (b - a), 0, 1);
+  return ease ? ease(t) : t;
+}
+function mix(hexA, hexB, t) {
+  const pa = parseInt(hexA.slice(1), 16);
+  const pb = parseInt(hexB.slice(1), 16);
+  const r = Math.round(lerp(pa >> 16 & 255, pb >> 16 & 255, t));
+  const g = Math.round(lerp(pa >> 8 & 255, pb >> 8 & 255, t));
+  const b = Math.round(lerp(pa & 255, pb & 255, t));
+  return `rgb(${r},${g},${b})`;
+}
+var CLAWD = {
+  width: 14,
+  height: 8,
+  body: "#CD6E58",
+  eye: "#000000",
+  data: [
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0],
+    [0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
+  ],
+  eyeLeft: { x: 4, y: 1 },
+  eyeRight: { x: 9, y: 1 }
+};
+var EYE_OFFSET = {
+  forward: { dx: 0, dy: 0 },
+  look_right: { dx: 1, dy: 0 },
+  look_left: { dx: -1, dy: 0 },
+  look_up: { dx: 0, dy: -1 },
+  look_down: { dx: 0, dy: 1 }
+};
+function drawClawd(ox, oy, opts = {}) {
+  const body = opts.body || CLAWD.body;
+  const a = opts.alpha;
+  for (let r = 0;r < CLAWD.height; r++)
+    for (let c = 0;c < CLAWD.width; c++)
+      if (CLAWD.data[r][c])
+        px(ox + c, oy + r, body, a);
+  const eyes = opts.eyes || "forward";
+  if (eyes === "blink")
+    return;
+  const o = EYE_OFFSET[eyes];
+  if (!opts.eyeCoverL)
+    px(ox + CLAWD.eyeLeft.x + o.dx, oy + CLAWD.eyeLeft.y + o.dy, CLAWD.eye, a);
+  px(ox + CLAWD.eyeRight.x + o.dx, oy + CLAWD.eyeRight.y + o.dy, CLAWD.eye, a);
+}
+function burst(f, at, n, x, y, col, seed, life = 26) {
+  const age = f - at;
+  if (age < 0 || age > life)
+    return;
+  for (let i = 0;i < n; i++) {
+    const vx = (rnd(seed + i) - 0.5) * 0.55;
+    const vy = -rnd(seed + i * 2 + 99) * 0.5 - 0.16;
+    px(x + vx * age, y + vy * age + 0.011 * age * age, col, 1 - age / life);
+  }
+}
+var GLYPHS = {
+  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001", "00000", "00000"],
+  B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110", "00000", "00000"],
+  C: ["01110", "10001", "10000", "10000", "10000", "10001", "01110", "00000", "00000"],
+  D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110", "00000", "00000"],
+  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111", "00000", "00000"],
+  G: ["01110", "10001", "10000", "10111", "10001", "10001", "01110", "00000", "00000"],
+  H: ["10001", "10001", "10001", "11111", "10001", "10001", "10001", "00000", "00000"],
+  I: ["01110", "00100", "00100", "00100", "00100", "00100", "01110", "00000", "00000"],
+  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111", "00000", "00000"],
+  M: ["10001", "11011", "10101", "10101", "10001", "10001", "10001", "00000", "00000"],
+  N: ["10001", "11001", "10101", "10011", "10001", "10001", "10001", "00000", "00000"],
+  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110", "00000", "00000"],
+  P: ["11110", "10001", "10001", "11110", "10000", "10000", "10000", "00000", "00000"],
+  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001", "00000", "00000"],
+  S: ["01111", "10000", "10000", "01110", "00001", "00001", "11110", "00000", "00000"],
+  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100", "00000", "00000"],
+  U: ["10001", "10001", "10001", "10001", "10001", "10001", "01110", "00000", "00000"],
+  V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100", "00000", "00000"],
+  W: ["10001", "10001", "10001", "10101", "10101", "10101", "01010", "00000", "00000"],
+  Y: ["10001", "10001", "01010", "00100", "00100", "00100", "00100", "00000", "00000"],
+  e: ["00000", "00000", "01110", "10001", "11111", "10000", "01110", "00000", "00000"],
+  f: ["00110", "01000", "11110", "01000", "01000", "01000", "01000", "00000", "00000"],
+  i: ["00100", "00000", "00100", "00100", "00100", "00100", "00100", "00000", "00000"],
+  l: ["01100", "00100", "00100", "00100", "00100", "00100", "01110", "00000", "00000"],
+  m: ["00000", "00000", "11111", "10101", "10101", "10101", "10101", "00000", "00000"],
+  n: ["00000", "00000", "10110", "11001", "10001", "10001", "10001", "00000", "00000"],
+  o: ["00000", "00000", "01110", "10001", "10001", "10001", "01110", "00000", "00000"],
+  s: ["00000", "00000", "01111", "10000", "01110", "00001", "11110", "00000", "00000"],
+  y: ["00000", "00000", "10001", "10001", "10001", "01111", "00001", "00001", "11110"],
+  "!": ["00100", "00100", "00100", "00100", "00100", "00000", "00100", "00000", "00000"],
+  "?": ["01110", "10001", "00001", "00110", "00100", "00000", "00100", "00000", "00000"],
+  ".": ["00000", "00000", "00000", "00000", "00000", "00000", "00100", "00000", "00000"],
+  "-": ["00000", "00000", "00000", "01110", "00000", "00000", "00000", "00000", "00000"],
+  "·": ["00000", "00000", "00000", "00100", "00000", "00000", "00000", "00000", "00000"]
+};
+var GLYPH_W = 5;
+var GLYPH_H = 9;
+var TRACK = 6;
+function textWidth(text, unit) {
+  return (text.length * TRACK - 1) * unit;
+}
+function drawText(text, unit, centerX, topY, col, alpha = 1) {
+  if (alpha <= 0.02)
+    return;
+  const x0 = Math.round(centerX - textWidth(text, unit) / 2);
+  ctx.globalAlpha = Math.min(1, alpha);
+  ctx.fillStyle = col;
+  for (let i = 0;i < text.length; i++) {
+    const g = GLYPHS[text[i]];
+    if (!g)
+      continue;
+    for (let r = 0;r < GLYPH_H; r++)
+      for (let c = 0;c < GLYPH_W; c++)
+        if (g[r][c] === "1")
+          ctx.fillRect(x0 + (i * TRACK + c) * unit, Math.round(topY) + r * unit, unit, unit);
+  }
+  ctx.globalAlpha = 1;
+}
+function initCanvas(cv) {
+  ctx = cv.getContext("2d");
+  return ctx;
+}
+function run(scene) {
+  const cv = document.getElementById("c");
+  initCanvas(cv);
+  window.__renderFrame = (f) => {
+    ctx.globalAlpha = 1;
+    scene.render(f);
+  };
+  window.__TOTAL = scene.frames;
+  window.__FPS = FPS;
+  window.__NAME = scene.name;
+  window.__LOOPS = scene.loops || 1;
+  document.title = `clawdarium · ${scene.name}`;
+  if (scene.background)
+    document.body.style.background = scene.background;
+  if (window.__capture) {
+    cv.style.width = cv.width + "px";
+    window.__renderFrame(0);
+    return;
+  }
+  const dur = scene.frames / FPS;
+  const info = document.getElementById("info");
+  let start = null;
+  function loop(ts) {
+    if (start === null)
+      start = ts;
+    const elapsed = (ts - start) / 1000;
+    const f = Math.floor(elapsed % dur * FPS);
+    window.__renderFrame(f);
+    if (info)
+      info.textContent = `${scene.name} — ${(f / FPS).toFixed(1)}s / ${dur.toFixed(1)}s`;
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+
+// scenes/gossip/common.ts
+var PALETTE = {
+  cork: "#6f5233",
+  corkHi: "#8d6b42",
+  corkLow: "#543c22",
+  vignette: "#170f07",
+  lamp: "#ffe7ba",
+  red: "#c0231f",
+  redLit: "#e24a3f",
+  redDark: "#7d0f0a",
+  brass: "#c9a23a",
+  flame: "#e8b13a",
+  panel: "#1d160e",
+  panelEdge: "#47372a",
+  ink: "#f2e9da",
+  inkDim: "#b8a684",
+  head: "#efe2c0",
+  headInk: "#241a10",
+  tagline: "#d8c49a",
+  squiggle: "#4a3c2c",
+  teal: "#5a7f7a",
+  mustard: "#b08a3e"
+};
+var STOCKS = ["#f7ec9f", "#e6d4a5", "#e8eae4", "#f2ccc1", "#e7e3d8"];
+var FLECKS = [];
+for (let i = 0;i < 300; i++) {
+  FLECKS.push({
+    gx: Math.floor(rnd(i * 3 + 1) * GW),
+    gy: Math.floor(rnd(i * 3 + 2) * GH),
+    hi: rnd(i * 3 + 3) > 0.45
+  });
+}
+function drawWall() {
+  for (let gy = 0;gy < GH; gy++) {
+    for (let gx = 0;gx < GW; gx++) {
+      const u = gx / GW * 0.55 + gy / GH * 0.45;
+      px(gx, gy, u < 0.48 ? mix(PALETTE.corkHi, PALETTE.cork, u / 0.48) : mix(PALETTE.cork, PALETTE.corkLow, (u - 0.48) / 0.52));
+    }
+  }
+  for (const f of FLECKS)
+    px(f.gx, f.gy, f.hi ? PALETTE.corkHi : PALETTE.corkLow, 0.5);
+}
+function drawLamp() {
+  for (let gy = 0;gy < GH; gy++) {
+    for (let gx = 0;gx < GW; gx++) {
+      const nx = (gx + 0.5 - GW / 2) / 24;
+      const ny = (gy + 0.5 - GH * 0.46) / 22;
+      const d = Math.sqrt(nx * nx + ny * ny);
+      const warm = 0.17 * Math.max(0, 1 - d / 0.62);
+      if (warm > 0.01)
+        px(gx, gy, PALETTE.lamp, warm);
+      if (d > 0.55)
+        px(gx, gy, PALETTE.vignette, Math.min(0.9, Math.pow((d - 0.55) / 0.55, 1.3) * 0.9));
+    }
+  }
+}
+function drawNote(gx, gy, w, h, o = {}) {
+  gx = Math.round(gx);
+  gy = Math.round(gy);
+  const a = o.alpha;
+  const paper = o.stock !== undefined ? STOCKS[o.stock % 5] : STOCKS[0];
+  if (w >= 3 && h >= 2) {
+    for (let y = 0;y < h; y++)
+      px(gx + w, gy + y + 1, PALETTE.vignette, (a === undefined ? 1 : a) * 0.45);
+    for (let x = 0;x < w; x++)
+      px(gx + x + 1, gy + h, PALETTE.vignette, (a === undefined ? 1 : a) * 0.45);
+  }
+  for (let y = 0;y < h; y++)
+    for (let x = 0;x < w; x++)
+      px(gx + x, gy + y, paper, a);
+  if (w >= 4 && h >= 3 && o.squiggle !== false) {
+    const seed = o.seed === undefined ? gx * 7 + gy : o.seed;
+    for (let r = 1;r < h - 1; r += 2) {
+      const len = 2 + Math.floor(rnd(seed + r) * (w - 3));
+      for (let x = 1;x <= len; x++)
+        px(gx + x, gy + r, PALETTE.squiggle, a);
+    }
+  }
+  if (o.pin)
+    px(gx + Math.floor(w / 2), gy, o.pin === "brass" ? PALETTE.brass : PALETTE.redLit, a);
+}
+function bubbleBox(bx, by, w, h, a) {
+  for (let y = -1;y <= h; y++)
+    for (let x = -1;x <= w; x++) {
+      const edge = y === -1 || y === h || x === -1 || x === w;
+      if (edge && ((y === -1 || y === h) && (x === -1 || x === w)))
+        continue;
+      px(bx + x, by + y, edge ? PALETTE.panelEdge : PALETTE.panel, a);
+    }
+  px(bx, by + h + 1, PALETTE.panelEdge, a);
+}
+var ICONS = {
+  eye: { p: PALETTE.ink, s: PALETTE.ink, d: [
+    [0, 1, 1, 1, 0],
+    [1, 0, 0, 0, 1],
+    [1, 0, 2, 0, 1],
+    [1, 0, 0, 0, 1],
+    [0, 1, 1, 1, 0]
+  ] },
+  heart: { p: PALETTE.red, s: PALETTE.redLit, d: [
+    [0, 1, 0, 1, 0],
+    [1, 2, 1, 2, 1],
+    [1, 1, 1, 1, 1],
+    [0, 1, 1, 1, 0],
+    [0, 0, 1, 0, 0]
+  ] },
+  fire: { p: PALETTE.red, s: PALETTE.flame, d: [
+    [0, 0, 1, 0, 0],
+    [0, 1, 1, 1, 0],
+    [1, 1, 2, 1, 1],
+    [1, 2, 2, 2, 1],
+    [0, 1, 1, 1, 0]
+  ] },
+  skull: { p: PALETTE.ink, s: PALETTE.ink, d: [
+    [0, 1, 1, 1, 0],
+    [1, 1, 1, 1, 1],
+    [1, 0, 1, 0, 1],
+    [0, 1, 1, 1, 0],
+    [0, 1, 0, 1, 0]
+  ] }
+};
+function drawIconBubble(bx, by, icon, a, pop) {
+  bubbleBox(bx, by, 5, 5, a);
+  const ic = ICONS[icon];
+  for (let r = 0;r < 5; r++)
+    for (let c = 0;c < 5; c++) {
+      const v = ic.d[r][c];
+      if (v)
+        px(bx + c, by + r, v === 2 ? ic.s : ic.p, a);
+    }
+  if (pop > 0) {
+    for (let i = -2;i <= 6; i++) {
+      px(bx + i, by - 2, PALETTE.ink, pop * 0.7);
+      px(bx + i, by + 6, PALETTE.ink, pop * 0.7);
+      px(bx - 2, by + i, PALETTE.ink, pop * 0.7);
+      px(bx + 6, by + i, PALETTE.ink, pop * 0.7);
+    }
+  }
+}
+function drawTextBubble(bx, by, text, a) {
+  const w = Math.max(2, text.length + 1);
+  bubbleBox(bx, by, w, 3, a);
+  const unit = clamp(Math.floor((w * PX - 16) / (text.length * 6 - 1)), 4, 9);
+  const topY = by * PX + (3 * PX - GLYPH_H * unit) / 2;
+  drawText(text, unit, (bx + w / 2) * PX, topY, PALETTE.ink, a === undefined ? 1 : a);
+}
+function drawStamp(a) {
+  if (a <= 0.02)
+    return;
+  const gx = 10, gy = 30, w = 16, h = 5;
+  for (let y = 0;y < h; y++)
+    px(gx + w, gy + y + 1, PALETTE.vignette, a * 0.5);
+  for (let x = 0;x < w; x++)
+    px(gx + x + 1, gy + h, PALETTE.vignette, a * 0.5);
+  for (let y = 0;y < h; y++)
+    for (let x = 0;x < w; x++)
+      px(gx + x, gy + y, PALETTE.head, a);
+  for (let x = 0;x < 3; x++) {
+    px(gx - 1 + x, gy - 1, PALETTE.inkDim, a * 0.55);
+    px(gx + w - 2 + x, gy - 1, PALETTE.inkDim, a * 0.55);
+  }
+  const unit = 6;
+  const topY = gy * PX + (h * PX - GLYPH_H * unit) / 2;
+  drawText("LOOSE THREADS", unit, (gx + w / 2) * PX, topY, PALETTE.headInk, a);
+}
+var stampIn = (f) => seg(f, 176, 186, easeOut);
+
+// scenes/gossip-telephone.ts
+var CHAIN = [
+  { x: 1, y: 4, body: CLAWD.body },
+  { x: 11, y: 14, body: PALETTE.teal },
+  { x: 21, y: 24, body: PALETTE.mustard }
+];
+var HOPS = [
+  { from: { x: 5, y: -1 }, to: { x: 15, y: 9 }, go: 26, land: 56, icon: "eye", next: "heart" },
+  { from: { x: 15, y: 9 }, to: { x: 25, y: 19 }, go: 64, land: 94, icon: "heart", next: "fire" },
+  { from: { x: 25, y: 19 }, to: { x: 29, y: 13 }, go: 102, land: 128, icon: "fire", next: "skull" }
+];
+run({
+  name: "gossip-telephone",
+  frames: 192,
+  background: "#0d0805",
+  render(f) {
+    drawWall();
+    drawNote(29, 1, 6, 4, { stock: 4, seed: 3, pin: true });
+    for (let i = 0;i < CHAIN.length; i++) {
+      const c = CHAIN[i];
+      const h = HOPS[i];
+      const talking = f >= h.go - 8 && f < h.land;
+      const listening = i > 0 && f >= HOPS[i - 1].go && f < HOPS[i - 1].land + 10;
+      let eyes = "forward";
+      if (talking)
+        eyes = "look_right";
+      else if (listening)
+        eyes = "look_left";
+      if (i === 0 && f >= 150)
+        eyes = "look_down";
+      if ((f + i * 27) % 90 >= 86)
+        eyes = "blink";
+      const lean = talking ? 1 : 0;
+      drawClawd(c.x + lean, c.y, { eyes, body: c.body });
+    }
+    if (f >= 124)
+      drawNote(29, 19, 6, 4, { stock: 3, seed: 8, pin: f >= 128 });
+    if (f >= 128)
+      burst(f, 128, 6, 32, 19, PALETTE.redLit, 17);
+    for (const h of HOPS) {
+      if (f < h.go - 6 || f > h.land + 20)
+        continue;
+      const appear = seg(f, h.go - 6, h.go, easeOut);
+      const fly = seg(f, h.go, h.land, easeInOut);
+      const gone = seg(f, h.land + 14, h.land + 20);
+      const a = appear * (1 - gone);
+      const bx = lerp(h.from.x, h.to.x, fly);
+      const by = lerp(h.from.y, h.to.y, fly);
+      const mutated = f >= h.land;
+      const pop = mutated ? 1 - seg(f, h.land, h.land + 7) : 0;
+      drawIconBubble(Math.round(bx), Math.round(by), mutated ? h.next : h.icon, a, pop);
+    }
+    if (f >= 150 && f < 182)
+      drawTextBubble(16, 1, "?", seg(f, 150, 156) * (1 - seg(f, 176, 182)));
+    drawLamp();
+    drawStamp(stampIn(f));
+  }
+});
+
+</script>
+</body>
+</html>

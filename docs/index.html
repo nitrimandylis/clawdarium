@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>clawdarium</title>
+<meta name="description" content="An aquarium for Clawd — every animation is a crab in the tank.">
+<style>
+/* Hallmark · route: custom (bespoke) · structure: one glowing tank in a dark room · idea: "all display type lives inside the canvas, drawn by the engine"
+ * paper: oklch(15% 0.02 240) · accent: oklch(64% 0.13 30) · display: engine pixel font (in-canvas) · body: system-ui
+ * axes: dark / pixel-display / warm · genre: playful · nav: sr-only index (bespoke) · footer: single caption line (bespoke)
+ * Hallmark · pre-emit critique: P4 H4 E4 S5 R5 V5
+ */
+:root {
+  --color-room:   oklch(15% 0.02 240);
+  --color-ink:    oklch(93% 0.01 80);
+  --color-ink-2:  oklch(70% 0.02 220);
+  --color-accent: oklch(64% 0.13 30);
+  --color-rule:   oklch(30% 0.02 235);
+  --color-focus:  oklch(82% 0.10 80);
+  --color-scrim:  oklch(8% 0.02 240 / 0.82);
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --space-sm: 8px; --space-md: 16px; --space-lg: 32px;
+  --dur-fast: 140ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { overflow-x: clip; }
+body {
+  background: var(--color-room);
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  min-height: 100svh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+}
+canvas {
+  image-rendering: pixelated;
+  width: min(92svh, 94vw);
+  max-width: 900px;
+  display: block;
+}
+.caption {
+  color: var(--color-ink-2);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+.caption b { color: var(--color-accent); font-weight: 600; }
+.sr-nav {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: clip;
+  clip-path: inset(50%);
+}
+.sr-nav a:focus-visible {
+  position: fixed; inset: auto auto var(--space-md) var(--space-md);
+  width: auto; height: auto;
+  background: var(--color-room);
+  color: var(--color-ink);
+  padding: var(--space-sm) var(--space-md);
+  outline: 2px solid var(--color-focus);
+}
+.overlay {
+  position: fixed; inset: 0;
+  background: var(--color-scrim);
+  display: flex; align-items: center; justify-content: center;
+}
+.overlay[hidden] { display: none; }
+.overlay iframe {
+  width: min(92svh, 94vw);
+  aspect-ratio: 1;
+  border: 1px solid var(--color-rule);
+  background: var(--color-room);
+}
+.overlay button {
+  position: absolute;
+  top: var(--space-md); right: var(--space-md);
+  width: 44px; height: 44px;
+  background: var(--color-room);
+  color: var(--color-ink);
+  border: 1px solid var(--color-rule);
+  font-size: 1.2rem; line-height: 1;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.overlay button:hover { border-color: var(--color-accent); }
+.overlay button:active { transform: translateY(1px); }
+.overlay button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .overlay button { transition: none; }
+}
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1080" aria-label="A pixel aquarium. Each crab is one animation — click a crab to watch its clip."></canvas>
+<p class="caption">an aquarium for <b>clawd</b> · <span id="count">filling the tank…</span></p>
+<nav class="sr-nav" aria-label="Animations"><ul id="navlist"></ul></nav>
+<div class="overlay" id="overlay" hidden>
+  <button type="button" aria-label="Close animation">×</button>
+  <iframe title=""></iframe>
+</div>
+<script type="module">
+// engine/engine.ts
+var PX = 30;
+var SIZE = 1080;
+var GW = SIZE / PX;
+var GH = SIZE / PX;
+var HP = PX / 2;
+var ctx;
+function px(gx, gy, col, a) {
+  if (gx < -2 || gy < -2 || gx > GW + 2 || gy > GH + 2)
+    return;
+  if (a !== undefined) {
+    if (a <= 0.02)
+      return;
+    ctx.globalAlpha = Math.min(1, a);
+  }
+  ctx.fillStyle = col;
+  ctx.fillRect(Math.round(gx) * PX, Math.round(gy) * PX, PX, PX);
+  if (a !== undefined)
+    ctx.globalAlpha = 1;
+}
+function pxh(hx, hy, col, a) {
+  if (a !== undefined) {
+    if (a <= 0.02)
+      return;
+    ctx.globalAlpha = Math.min(1, a);
+  }
+  ctx.fillStyle = col;
+  ctx.fillRect(Math.round(hx) * HP, Math.round(hy) * HP, HP, HP);
+  if (a !== undefined)
+    ctx.globalAlpha = 1;
+}
+function rnd(seed) {
+  const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+function mix(hexA, hexB, t) {
+  const pa = parseInt(hexA.slice(1), 16);
+  const pb = parseInt(hexB.slice(1), 16);
+  const r = Math.round(lerp(pa >> 16 & 255, pb >> 16 & 255, t));
+  const g = Math.round(lerp(pa >> 8 & 255, pb >> 8 & 255, t));
+  const b = Math.round(lerp(pa & 255, pb & 255, t));
+  return `rgb(${r},${g},${b})`;
+}
+var CLAWD = {
+  width: 14,
+  height: 8,
+  body: "#CD6E58",
+  eye: "#000000",
+  data: [
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0],
+    [0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
+  ],
+  eyeLeft: { x: 4, y: 1 },
+  eyeRight: { x: 9, y: 1 }
+};
+var EYE_OFFSET = {
+  forward: { dx: 0, dy: 0 },
+  look_right: { dx: 1, dy: 0 },
+  look_left: { dx: -1, dy: 0 },
+  look_up: { dx: 0, dy: -1 },
+  look_down: { dx: 0, dy: 1 }
+};
+function drawClawd(ox, oy, opts = {}) {
+  const body = opts.body || CLAWD.body;
+  const a = opts.alpha;
+  for (let r = 0;r < CLAWD.height; r++)
+    for (let c = 0;c < CLAWD.width; c++)
+      if (CLAWD.data[r][c])
+        px(ox + c, oy + r, body, a);
+  const eyes = opts.eyes || "forward";
+  if (eyes === "blink")
+    return;
+  const o = EYE_OFFSET[eyes];
+  if (!opts.eyeCoverL)
+    px(ox + CLAWD.eyeLeft.x + o.dx, oy + CLAWD.eyeLeft.y + o.dy, CLAWD.eye, a);
+  px(ox + CLAWD.eyeRight.x + o.dx, oy + CLAWD.eyeRight.y + o.dy, CLAWD.eye, a);
+}
+var GLYPHS = {
+  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001", "00000", "00000"],
+  B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110", "00000", "00000"],
+  C: ["01110", "10001", "10000", "10000", "10000", "10001", "01110", "00000", "00000"],
+  D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110", "00000", "00000"],
+  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111", "00000", "00000"],
+  G: ["01110", "10001", "10000", "10111", "10001", "10001", "01110", "00000", "00000"],
+  H: ["10001", "10001", "10001", "11111", "10001", "10001", "10001", "00000", "00000"],
+  I: ["01110", "00100", "00100", "00100", "00100", "00100", "01110", "00000", "00000"],
+  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111", "00000", "00000"],
+  M: ["10001", "11011", "10101", "10101", "10001", "10001", "10001", "00000", "00000"],
+  N: ["10001", "11001", "10101", "10011", "10001", "10001", "10001", "00000", "00000"],
+  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110", "00000", "00000"],
+  P: ["11110", "10001", "10001", "11110", "10000", "10000", "10000", "00000", "00000"],
+  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001", "00000", "00000"],
+  S: ["01111", "10000", "10000", "01110", "00001", "00001", "11110", "00000", "00000"],
+  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100", "00000", "00000"],
+  U: ["10001", "10001", "10001", "10001", "10001", "10001", "01110", "00000", "00000"],
+  V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100", "00000", "00000"],
+  W: ["10001", "10001", "10001", "10101", "10101", "10101", "01010", "00000", "00000"],
+  Y: ["10001", "10001", "01010", "00100", "00100", "00100", "00100", "00000", "00000"],
+  e: ["00000", "00000", "01110", "10001", "11111", "10000", "01110", "00000", "00000"],
+  f: ["00110", "01000", "11110", "01000", "01000", "01000", "01000", "00000", "00000"],
+  i: ["00100", "00000", "00100", "00100", "00100", "00100", "00100", "00000", "00000"],
+  l: ["01100", "00100", "00100", "00100", "00100", "00100", "01110", "00000", "00000"],
+  m: ["00000", "00000", "11111", "10101", "10101", "10101", "10101", "00000", "00000"],
+  n: ["00000", "00000", "10110", "11001", "10001", "10001", "10001", "00000", "00000"],
+  o: ["00000", "00000", "01110", "10001", "10001", "10001", "01110", "00000", "00000"],
+  s: ["00000", "00000", "01111", "10000", "01110", "00001", "11110", "00000", "00000"],
+  y: ["00000", "00000", "10001", "10001", "10001", "01111", "00001", "00001", "11110"],
+  "!": ["00100", "00100", "00100", "00100", "00100", "00000", "00100", "00000", "00000"],
+  "?": ["01110", "10001", "00001", "00110", "00100", "00000", "00100", "00000", "00000"],
+  ".": ["00000", "00000", "00000", "00000", "00000", "00000", "00100", "00000", "00000"],
+  "-": ["00000", "00000", "00000", "01110", "00000", "00000", "00000", "00000", "00000"],
+  "·": ["00000", "00000", "00000", "00100", "00000", "00000", "00000", "00000", "00000"]
+};
+var GLYPH_W = 5;
+var GLYPH_H = 9;
+var TRACK = 6;
+function textWidth(text, unit) {
+  return (text.length * TRACK - 1) * unit;
+}
+function drawText(text, unit, centerX, topY, col, alpha = 1) {
+  if (alpha <= 0.02)
+    return;
+  const x0 = Math.round(centerX - textWidth(text, unit) / 2);
+  ctx.globalAlpha = Math.min(1, alpha);
+  ctx.fillStyle = col;
+  for (let i = 0;i < text.length; i++) {
+    const g = GLYPHS[text[i]];
+    if (!g)
+      continue;
+    for (let r = 0;r < GLYPH_H; r++)
+      for (let c = 0;c < GLYPH_W; c++)
+        if (g[r][c] === "1")
+          ctx.fillRect(x0 + (i * TRACK + c) * unit, Math.round(topY) + r * unit, unit, unit);
+  }
+  ctx.globalAlpha = 1;
+}
+function initCanvas(cv) {
+  ctx = cv.getContext("2d");
+  return ctx;
+}
+
+// hub/tank.ts
+var WATER = {
+  frame: "#241a12",
+  frameHi: "#4a3a28",
+  glass: "#bfe8e2",
+  air: "#0d1b22",
+  top: "#1a4a54",
+  bottom: "#0a2029",
+  foam: "#c8ece6",
+  ray: "#9fd8cc",
+  sandHi: "#c8a86a",
+  sand: "#a8874e",
+  sandLow: "#7a5f33",
+  kelp: "#2f7a58",
+  kelpDark: "#1e5a40",
+  fish: "#7fb3c2",
+  tagInk: "#f2e9da",
+  tagShadow: "#10262c",
+  title: "#a8d8ce"
+};
+var WATERLINE = 3;
+var SAND_TOP = 27;
+var INNER_L = 1;
+var INNER_R = GH - 2;
+var crabs = [];
+var hovered = null;
+var running = true;
+var cv = document.getElementById("c");
+var ctx2 = initCanvas(cv);
+var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function drawTankFrame() {
+  for (let g = 0;g < GW; g++) {
+    px(g, 0, WATER.frame);
+    px(g, GH - 1, WATER.frame);
+  }
+  for (let g = 0;g < GH; g++) {
+    px(0, g, WATER.frame);
+    px(GW - 1, g, WATER.frame);
+  }
+  for (let g = 4;g < 12; g++)
+    px(1, g, WATER.glass, 0.18);
+  for (let g = 14;g < 17; g++)
+    px(1, g, WATER.glass, 0.1);
+}
+function drawWater(sec) {
+  for (let gy = 1;gy < WATERLINE; gy++)
+    for (let gx = INNER_L;gx <= INNER_R; gx++)
+      px(gx, gy, WATER.air);
+  for (let gy = WATERLINE;gy < GH - 1; gy++) {
+    const p = (gy - WATERLINE) / (GH - 2 - WATERLINE);
+    const col = mix(WATER.top, WATER.bottom, p);
+    for (let gx = INNER_L;gx <= INNER_R; gx++)
+      px(gx, gy, col);
+  }
+  for (let gx = INNER_L;gx <= INNER_R; gx++) {
+    const w = Math.sin(sec * 1.4 + gx * 0.9);
+    px(gx, WATERLINE, WATER.foam, 0.35 + 0.2 * w);
+    if (w > 0.55)
+      px(gx, WATERLINE + 1, WATER.foam, 0.12);
+  }
+  for (const r of [7, 16, 26]) {
+    const drift = Math.sin(sec * 0.3 + r) * 1.5;
+    for (let gy = WATERLINE + 1;gy < SAND_TOP + 3; gy++) {
+      const gx = Math.round(r + drift + (gy - WATERLINE) * 0.35);
+      const a = 0.1 * (1 - (gy - WATERLINE) / 26);
+      if (gx > INNER_L && gx < INNER_R) {
+        px(gx, gy, WATER.ray, a);
+        px(gx + 1, gy, WATER.ray, a * 0.6);
+      }
+    }
+  }
+}
+function drawSand() {
+  for (let gy = SAND_TOP;gy < GH - 1; gy++) {
+    const p = (gy - SAND_TOP) / (GH - 1 - SAND_TOP);
+    const col = mix(WATER.sandHi, WATER.sand, p);
+    for (let gx = INNER_L;gx <= INNER_R; gx++) {
+      if (gy === SAND_TOP && rnd(gx * 7) > 0.55)
+        continue;
+      px(gx, gy, col);
+    }
+  }
+  for (let i = 0;i < 60; i++) {
+    const gx = INNER_L + Math.floor(rnd(i * 5 + 2) * (INNER_R - INNER_L));
+    const gy = SAND_TOP + 1 + Math.floor(rnd(i * 3 + 7) * (GH - 3 - SAND_TOP));
+    px(gx, gy, rnd(i) > 0.5 ? WATER.sandLow : WATER.sandHi, 0.6);
+  }
+}
+function drawKelp(sec) {
+  const stalks = [{ gx: 4, h: 14 }, { gx: 30, h: 17 }, { gx: 33, h: 10 }];
+  for (const s of stalks) {
+    for (let i = 0;i < s.h; i++) {
+      const gy = SAND_TOP - i;
+      const sway = Math.round(Math.sin(sec * 0.9 + s.gx + i * 0.35) * (i / s.h) * 1.8);
+      const gx = s.gx + sway;
+      px(gx, gy, i % 3 === 2 ? WATER.kelpDark : WATER.kelp);
+      if (i % 4 === 1)
+        px(gx + (i % 8 < 4 ? 1 : -1), gy, WATER.kelpDark, 0.8);
+    }
+  }
+}
+function drawBubbles(sec) {
+  for (let k = 0;k < 10; k++) {
+    const col = INNER_L + 1 + rnd(k * 7 + 3) * (INNER_R - INNER_L - 2);
+    const speed = 1.6 + rnd(k * 11) * 2.2;
+    const span = SAND_TOP - WATERLINE - 1;
+    const gy = SAND_TOP - (sec * speed + rnd(k * 13) * span) % span;
+    const wob = Math.sin(sec * 3 + k) * 0.5;
+    const a = 0.55 * Math.min(1, (gy - WATERLINE) / 3);
+    pxh((col + wob) * 2, gy * 2, WATER.foam, a);
+  }
+}
+function drawFish(sec) {
+  const lanes = [{ y: 8, speed: 2.6, dir: 1 }, { y: 13, speed: 1.8, dir: -1 }, { y: 19, speed: 3.4, dir: 1 }];
+  for (let i = 0;i < lanes.length; i++) {
+    const f = lanes[i];
+    const spanH = (INNER_R - INNER_L + 8) * 2;
+    let hx = (sec * f.speed * 2 + i * 23) % spanH;
+    if (f.dir === -1)
+      hx = spanH - hx;
+    hx += INNER_L * 2 - 4;
+    const hy = f.y * 2 + Math.round(Math.sin(sec * 2 + i) * 1);
+    pxh(hx, hy, WATER.fish, 0.75);
+    pxh(hx + f.dir, hy, WATER.fish, 0.75);
+    pxh(hx - f.dir, hy - i % 2, WATER.fish, 0.5);
+  }
+}
+function drawTitle() {
+  drawText("CLAWDARIUM", 6, SIZE / 2 + 6, 1.2 * PX + 6, WATER.tagShadow, 0.5);
+  drawText("CLAWDARIUM", 6, SIZE / 2, 1.2 * PX, WATER.title, 0.9);
+}
+var LANES = [19, 21, 23];
+var X_MIN = INNER_L + 1;
+var X_MAX = INNER_R - CLAWD.width;
+function spawnCrab(name, dir, i) {
+  const lane = LANES[i % LANES.length];
+  const x = X_MIN + rnd(i * 31 + 5) * (X_MAX - X_MIN);
+  crabs.push({
+    name,
+    dir,
+    label: name.replace(/^gossip-/, "").replace(/-/g, " ").toUpperCase(),
+    x,
+    y: lane,
+    target: x,
+    speed: 2.2 + rnd(i * 17) * 1.4,
+    restUntil: rnd(i * 7) * 4,
+    seed: i * 97 + 13
+  });
+}
+function updateCrab(c, sec, dt) {
+  if (sec < c.restUntil)
+    return;
+  if (Math.abs(c.x - c.target) < 0.3) {
+    c.restUntil = sec + 1.5 + Math.random() * 4;
+    c.target = X_MIN + Math.random() * (X_MAX - X_MIN);
+    return;
+  }
+  c.x += Math.sign(c.target - c.x) * c.speed * dt;
+}
+function drawCrab(c, sec) {
+  const walking = sec >= c.restUntil && Math.abs(c.x - c.target) >= 0.3;
+  const step = walking && Math.sin(sec * 9 + c.seed) > 0.3 ? -1 : 0;
+  const blink = (sec * 24 + c.seed) % 90 >= 87;
+  const eyes = blink ? "blink" : walking ? c.target > c.x ? "look_right" : "look_left" : c === hovered ? "look_up" : "forward";
+  const depth = (LANES[LANES.length - 1] - c.y) / (LANES[LANES.length - 1] - LANES[0]);
+  const body = depth > 0 ? mix(CLAWD.body, WATER.bottom, depth * 0.38) : CLAWD.body;
+  drawClawd(Math.round(c.x), c.y + step, { eyes, body });
+}
+function drawTag(c) {
+  const cx = (Math.round(c.x) + CLAWD.width / 2) * PX;
+  const topY = (c.y - 2.4) * PX;
+  const w = textWidth(c.label, 4) + 24;
+  ctx2.fillStyle = WATER.tagShadow;
+  ctx2.globalAlpha = 0.85;
+  ctx2.fillRect(Math.round(cx - w / 2), topY - 10, w, 4 * 9 + 20);
+  ctx2.globalAlpha = 1;
+  drawText(c.label, 4, cx, topY, WATER.tagInk);
+}
+var last = 0;
+function frame(ts) {
+  const sec = ts / 1000;
+  const dt = Math.min(0.05, (ts - last) / 1000);
+  last = ts;
+  drawWater(sec);
+  drawKelp(sec);
+  drawFish(sec);
+  drawSand();
+  for (const c of crabs)
+    updateCrab(c, sec, dt);
+  for (const c of [...crabs].sort((a, b) => a.y - b.y))
+    drawCrab(c, sec);
+  drawBubbles(sec);
+  drawTitle();
+  drawTankFrame();
+  if (hovered)
+    drawTag(hovered);
+  if (running && !reduced)
+    requestAnimationFrame(frame);
+}
+function crabAt(clientX, clientY) {
+  const r = cv.getBoundingClientRect();
+  const gx = (clientX - r.left) / r.width * GW;
+  const gy = (clientY - r.top) / r.height * GH;
+  for (const c of [...crabs].sort((a, b) => b.y - a.y)) {
+    if (gx >= c.x && gx <= c.x + CLAWD.width && gy >= c.y - 1 && gy <= c.y + CLAWD.height)
+      return c;
+  }
+  return null;
+}
+var overlay = document.getElementById("overlay");
+var iframe = overlay.querySelector("iframe");
+var closeBtn = overlay.querySelector("button");
+function openClip(c) {
+  iframe.src = c.dir + c.name + ".html";
+  iframe.title = c.label;
+  overlay.hidden = false;
+  running = false;
+  closeBtn.focus();
+}
+function closeClip() {
+  overlay.hidden = true;
+  iframe.src = "about:blank";
+  if (!running) {
+    running = true;
+    if (!reduced) {
+      last = performance.now();
+      requestAnimationFrame(frame);
+    }
+  }
+  cv.focus?.();
+}
+cv.addEventListener("mousemove", (e) => {
+  hovered = crabAt(e.clientX, e.clientY);
+  cv.style.cursor = hovered ? "pointer" : "default";
+  if (reduced)
+    frame(performance.now());
+});
+cv.addEventListener("mouseleave", () => {
+  hovered = null;
+});
+cv.addEventListener("click", (e) => {
+  const c = crabAt(e.clientX, e.clientY);
+  if (c)
+    openClip(c);
+});
+closeBtn.addEventListener("click", closeClip);
+overlay.addEventListener("click", (e) => {
+  if (e.target === overlay)
+    closeClip();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !overlay.hidden)
+    closeClip();
+});
+async function scenesFrom(path) {
+  try {
+    const res = await fetch(path);
+    if (!res.ok)
+      return [];
+    return (await res.json()).scenes;
+  } catch {
+    return [];
+  }
+}
+var pub = await scenesFrom("manifest.json");
+var priv = await scenesFrom("private/manifest.json");
+pub.forEach((n, i) => spawnCrab(n, "", i));
+priv.forEach((n, i) => spawnCrab(n, "private/", pub.length + i));
+var nav = document.getElementById("navlist");
+for (const c of crabs) {
+  const li = document.createElement("li");
+  const a = document.createElement("a");
+  a.href = c.dir + c.name + ".html";
+  a.textContent = c.label.toLowerCase();
+  li.appendChild(a);
+  nav.appendChild(li);
+}
+var count = document.getElementById("count");
+if (count)
+  count.textContent = crabs.length === 0 ? "the tank is empty — run bun serve.ts locally" : `${crabs.length} ${crabs.length === 1 ? "crab" : "crabs"} in the tank · click one`;
+requestAnimationFrame(frame);
+
+</script>
+</body>
+</html>

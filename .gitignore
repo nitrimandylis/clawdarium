@@ -1,0 +1,7 @@
+node_modules
+.DS_Store
+frames-*
+
+# personal scenes: build and render locally, never push
+scenes/private/
+docs/private/
