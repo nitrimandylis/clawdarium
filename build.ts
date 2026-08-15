@@ -9,7 +9,7 @@
 // local builds and never on GitHub.
 
 import { Glob } from 'bun';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync } from 'node:fs';
 import { CLAWD } from './engine/engine';
 
 const DIR = import.meta.dir;
@@ -85,7 +85,10 @@ async function buildScenes(srcDir: string, outDir: string) {
 }
 
 const publicScenes = await buildScenes(`${DIR}/scenes`, `${DIR}/docs`);
-const privateScenes = await buildScenes(`${DIR}/scenes/private`, `${DIR}/docs/private`);
+// scenes/private is gitignored, so a fresh clone has no such directory
+const privateScenes = existsSync(`${DIR}/scenes/private`)
+  ? await buildScenes(`${DIR}/scenes/private`, `${DIR}/docs/private`)
+  : [];
 
 await Bun.write(`${DIR}/docs/favicon.svg`, faviconSvg());
 

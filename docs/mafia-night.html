@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>clawdarium · mafia-night</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #111;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden;
+    font-family: 'Courier New', monospace;
+  }
+  canvas { image-rendering: pixelated; width: min(92vh, 92vw); }
+  .info { color: #777; font-size: 11px; margin-top: 12px; letter-spacing: 2px; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1080"></canvas>
+<div class="info" id="info"></div>
+<script>
+// engine/engine.ts
+var PX = 30;
+var SIZE = 1080;
+var GW = SIZE / PX;
+var GH = SIZE / PX;
+var HP = PX / 2;
+var FPS = 24;
+var ctx;
+function px(gx, gy, col, a) {
+  if (gx < -2 || gy < -2 || gx > GW + 2 || gy > GH + 2)
+    return;
+  if (a !== undefined) {
+    if (a <= 0.02)
+      return;
+    ctx.globalAlpha = Math.min(1, a);
+  }
+  ctx.fillStyle = col;
+  ctx.fillRect(Math.round(gx) * PX, Math.round(gy) * PX, PX, PX);
+  if (a !== undefined)
+    ctx.globalAlpha = 1;
+}
+function row(gy, col) {
+  ctx.fillStyle = col;
+  ctx.fillRect(0, gy * PX, SIZE, PX);
+}
+function rnd(seed) {
+  const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+function clamp(v, a, b) {
+  return v < a ? a : v > b ? b : v;
+}
+function easeInOut(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+function seg(f, a, b, ease) {
+  const t = clamp((f - a) / (b - a), 0, 1);
+  return ease ? ease(t) : t;
+}
+function mix(hexA, hexB, t) {
+  const pa = parseInt(hexA.slice(1), 16);
+  const pb = parseInt(hexB.slice(1), 16);
+  const r = Math.round(lerp(pa >> 16 & 255, pb >> 16 & 255, t));
+  const g = Math.round(lerp(pa >> 8 & 255, pb >> 8 & 255, t));
+  const b = Math.round(lerp(pa & 255, pb & 255, t));
+  return `rgb(${r},${g},${b})`;
+}
+var CLAWD = {
+  width: 14,
+  height: 8,
+  body: "#CD6E58",
+  eye: "#000000",
+  data: [
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0],
+    [0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0]
+  ],
+  eyeLeft: { x: 4, y: 1 },
+  eyeRight: { x: 9, y: 1 }
+};
+var EYE_OFFSET = {
+  forward: { dx: 0, dy: 0 },
+  look_right: { dx: 1, dy: 0 },
+  look_left: { dx: -1, dy: 0 },
+  look_up: { dx: 0, dy: -1 },
+  look_down: { dx: 0, dy: 1 }
+};
+function drawClawd(ox, oy, opts = {}) {
+  const body = opts.body || CLAWD.body;
+  const a = opts.alpha;
+  for (let r = 0;r < CLAWD.height; r++)
+    for (let c = 0;c < CLAWD.width; c++)
+      if (CLAWD.data[r][c])
+        px(ox + c, oy + r, body, a);
+  const eyes = opts.eyes || "forward";
+  if (eyes === "blink")
+    return;
+  const o = EYE_OFFSET[eyes];
+  if (!opts.eyeCoverL)
+    px(ox + CLAWD.eyeLeft.x + o.dx, oy + CLAWD.eyeLeft.y + o.dy, CLAWD.eye, a);
+  px(ox + CLAWD.eyeRight.x + o.dx, oy + CLAWD.eyeRight.y + o.dy, CLAWD.eye, a);
+}
+function burst(f, at, n, x, y, col, seed, life = 26) {
+  const age = f - at;
+  if (age < 0 || age > life)
+    return;
+  for (let i = 0;i < n; i++) {
+    const vx = (rnd(seed + i) - 0.5) * 0.55;
+    const vy = -rnd(seed + i * 2 + 99) * 0.5 - 0.16;
+    px(x + vx * age, y + vy * age + 0.011 * age * age, col, 1 - age / life);
+  }
+}
+var GLYPHS = {
+  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001", "00000", "00000"],
+  B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110", "00000", "00000"],
+  C: ["01110", "10001", "10000", "10000", "10000", "10001", "01110", "00000", "00000"],
+  D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110", "00000", "00000"],
+  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111", "00000", "00000"],
+  G: ["01110", "10001", "10000", "10111", "10001", "10001", "01110", "00000", "00000"],
+  H: ["10001", "10001", "10001", "11111", "10001", "10001", "10001", "00000", "00000"],
+  I: ["01110", "00100", "00100", "00100", "00100", "00100", "01110", "00000", "00000"],
+  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111", "00000", "00000"],
+  M: ["10001", "11011", "10101", "10101", "10001", "10001", "10001", "00000", "00000"],
+  N: ["10001", "11001", "10101", "10011", "10001", "10001", "10001", "00000", "00000"],
+  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110", "00000", "00000"],
+  P: ["11110", "10001", "10001", "11110", "10000", "10000", "10000", "00000", "00000"],
+  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001", "00000", "00000"],
+  S: ["01111", "10000", "10000", "01110", "00001", "00001", "11110", "00000", "00000"],
+  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100", "00000", "00000"],
+  U: ["10001", "10001", "10001", "10001", "10001", "10001", "01110", "00000", "00000"],
+  V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100", "00000", "00000"],
+  W: ["10001", "10001", "10001", "10101", "10101", "10101", "01010", "00000", "00000"],
+  Y: ["10001", "10001", "01010", "00100", "00100", "00100", "00100", "00000", "00000"],
+  e: ["00000", "00000", "01110", "10001", "11111", "10000", "01110", "00000", "00000"],
+  f: ["00110", "01000", "11110", "01000", "01000", "01000", "01000", "00000", "00000"],
+  i: ["00100", "00000", "00100", "00100", "00100", "00100", "00100", "00000", "00000"],
+  l: ["01100", "00100", "00100", "00100", "00100", "00100", "01110", "00000", "00000"],
+  m: ["00000", "00000", "11111", "10101", "10101", "10101", "10101", "00000", "00000"],
+  n: ["00000", "00000", "10110", "11001", "10001", "10001", "10001", "00000", "00000"],
+  o: ["00000", "00000", "01110", "10001", "10001", "10001", "01110", "00000", "00000"],
+  s: ["00000", "00000", "01111", "10000", "01110", "00001", "11110", "00000", "00000"],
+  y: ["00000", "00000", "10001", "10001", "10001", "01111", "00001", "00001", "11110"],
+  "!": ["00100", "00100", "00100", "00100", "00100", "00000", "00100", "00000", "00000"],
+  "?": ["01110", "10001", "00001", "00110", "00100", "00000", "00100", "00000", "00000"],
+  ".": ["00000", "00000", "00000", "00000", "00000", "00000", "00100", "00000", "00000"],
+  "-": ["00000", "00000", "00000", "01110", "00000", "00000", "00000", "00000", "00000"],
+  "·": ["00000", "00000", "00000", "00100", "00000", "00000", "00000", "00000", "00000"]
+};
+var GLYPH_W = 5;
+var GLYPH_H = 9;
+var TRACK = 6;
+function textWidth(text, unit) {
+  return (text.length * TRACK - 1) * unit;
+}
+function drawText(text, unit, centerX, topY, col, alpha = 1) {
+  if (alpha <= 0.02)
+    return;
+  const x0 = Math.round(centerX - textWidth(text, unit) / 2);
+  ctx.globalAlpha = Math.min(1, alpha);
+  ctx.fillStyle = col;
+  for (let i = 0;i < text.length; i++) {
+    const g = GLYPHS[text[i]];
+    if (!g)
+      continue;
+    for (let r = 0;r < GLYPH_H; r++)
+      for (let c = 0;c < GLYPH_W; c++)
+        if (g[r][c] === "1")
+          ctx.fillRect(x0 + (i * TRACK + c) * unit, Math.round(topY) + r * unit, unit, unit);
+  }
+  ctx.globalAlpha = 1;
+}
+function initCanvas(cv) {
+  ctx = cv.getContext("2d");
+  return ctx;
+}
+function run(scene) {
+  const cv = document.getElementById("c");
+  initCanvas(cv);
+  window.__renderFrame = (f) => {
+    ctx.globalAlpha = 1;
+    scene.render(f);
+  };
+  window.__TOTAL = scene.frames;
+  window.__FPS = FPS;
+  window.__NAME = scene.name;
+  window.__LOOPS = scene.loops || 1;
+  document.title = `clawdarium · ${scene.name}`;
+  if (scene.background)
+    document.body.style.background = scene.background;
+  if (window.__capture) {
+    cv.style.width = cv.width + "px";
+    window.__renderFrame(0);
+    return;
+  }
+  const dur = scene.frames / FPS;
+  const info = document.getElementById("info");
+  let start = null;
+  function loop(ts) {
+    if (start === null)
+      start = ts;
+    const elapsed = (ts - start) / 1000;
+    const f = Math.floor(elapsed % dur * FPS);
+    window.__renderFrame(f);
+    if (info)
+      info.textContent = `${scene.name} — ${(f / FPS).toFixed(1)}s / ${dur.toFixed(1)}s`;
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+
+// scenes/mafia-night.ts
+var P = {
+  base: "#050609",
+  surface: "#0a0b10",
+  overlay: "#1b1d26",
+  muted: "#8b8f9c",
+  accent: "#ff2a2a",
+  deep: "#c41e1e",
+  gold: "#e0a000",
+  bulb: "#ffe7ba",
+  bodyGold: "#b07c00",
+  bodyBlue: "#4a6a8f"
+};
+var DIM0 = 34;
+var DIM1 = 56;
+var SLEEP0 = 30;
+var SLEEP1 = 118;
+var OPEN = 58;
+var GAZE0 = 88;
+var GAZE1 = 106;
+var STRIKE = 106;
+var DAWN0 = 118;
+var DAWN1 = 142;
+var STING = 148;
+var CREW = [
+  { x: 2, y: 5, body: CLAWD.body },
+  { x: 20, y: 6, body: P.bodyGold },
+  { x: 1, y: 20, body: P.bodyBlue },
+  { x: 19, y: 21, body: P.muted }
+];
+var VICTIM = 0;
+var MAFIA = 3;
+function light(f) {
+  const down = seg(f, DIM0, DIM1, easeInOut);
+  const up = seg(f, DAWN0, DAWN1, easeInOut);
+  return clamp(1 - down * 0.95 + up * 0.95, 0.05, 1);
+}
+function drawRoom() {
+  for (let gy = 0;gy < GH; gy++)
+    row(gy, mix(P.surface, P.base, gy / (GH - 1)));
+  for (let gy = 0;gy < GH; gy += 3)
+    for (let gx = 0;gx < GW; gx++)
+      px(gx, gy, P.base, 0.35);
+}
+function drawBulb(lit) {
+  for (let gy = 0;gy < 3; gy++)
+    px(18, gy, P.overlay);
+  const glass = mix(P.overlay, P.gold, lit);
+  for (let gy = 3;gy <= 4; gy++)
+    for (let gx = 17;gx <= 18; gx++)
+      px(gx, gy, glass);
+}
+function drawLight(lit) {
+  for (let gy = 0;gy < GH; gy++)
+    for (let gx = 0;gx < GW; gx++) {
+      const nx = (gx + 0.5 - 18) / 22, ny = (gy + 0.5 - 14) / 20;
+      const d = Math.sqrt(nx * nx + ny * ny);
+      const halo = Math.max(0, 1 - Math.hypot(gx - 17.5, gy - 4) / 6);
+      px(gx, gy, P.bulb, lit * (0.32 * Math.max(0, 1 - d / 0.9) + 0.18 * halo * halo));
+      px(gx, gy, P.base, Math.min(0.94, (1 - lit) * 0.9 + clamp(d - 0.45, 0, 1) * 0.5));
+    }
+}
+run({
+  name: "mafia-night",
+  frames: 168,
+  loops: 3,
+  background: "#050609",
+  render(f) {
+    const lit = light(f);
+    drawRoom();
+    drawBulb(lit);
+    for (let i = 0;i < CREW.length; i++) {
+      const c = CREW[i];
+      if (i === VICTIM && f >= STRIKE)
+        continue;
+      let eyes = "forward";
+      if (f < SLEEP0)
+        eyes = i % 2 === 0 ? "look_right" : "look_left";
+      else if (f < SLEEP1)
+        eyes = "blink";
+      else if (i === 1)
+        eyes = "look_left";
+      else
+        eyes = "look_up";
+      if (i === MAFIA && f >= STING)
+        eyes = "forward";
+      if (f < SLEEP0 && (f + i * 17) % 30 >= 27)
+        eyes = "blink";
+      drawClawd(c.x, c.y, { eyes, body: c.body });
+    }
+    drawLight(lit);
+    const m = CREW[MAFIA];
+    if (f >= OPEN && f < STRIKE + 8) {
+      const a = seg(f, OPEN, OPEN + 12) * (0.84 + 0.16 * Math.sin(f * 0.3));
+      px(m.x + CLAWD.eyeLeft.x, m.y + CLAWD.eyeLeft.y, P.accent, a);
+      px(m.x + CLAWD.eyeRight.x, m.y + CLAWD.eyeRight.y, P.accent, a);
+    }
+    const v = CREW[VICTIM];
+    if (f >= GAZE0 && f < STRIKE + 4) {
+      const t = seg(f, GAZE0, GAZE1, easeInOut);
+      for (let k = 0;k < 4; k++) {
+        const tk = clamp(t - k * 0.06, 0, 1);
+        px(lerp(m.x + 6, v.x + 6, tk), lerp(m.y + 1, v.y + 2, tk), k === 0 ? P.accent : P.deep, 0.9 - k * 0.2);
+      }
+    }
+    if (f >= STRIKE && f < STRIKE + 12)
+      drawClawd(v.x, v.y, { body: P.accent, alpha: 1 - seg(f, STRIKE, STRIKE + 12), eyes: "blink" });
+    burst(f, STRIKE, 6, v.x + 3, v.y + 2, P.deep, 21, 22);
+    burst(f, STRIKE, 5, v.x + 12, v.y + 5, P.accent, 47, 22);
+    if (f >= DAWN0)
+      drawClawd(v.x, v.y, { body: P.muted, alpha: 0.16 * (1 - seg(f, 138, 152)), eyes: "blink" });
+    if (f >= STING) {
+      const a = seg(f, STING, STING + 5) * (1 - seg(f, 158, 166));
+      px(m.x + CLAWD.eyeLeft.x, m.y + CLAWD.eyeLeft.y, P.accent, a);
+      px(m.x + CLAWD.eyeRight.x, m.y + CLAWD.eyeRight.y, P.accent, a);
+    }
+    drawText("NIGHT", 8, 540, 430, P.muted, seg(f, 36, 46) * (1 - seg(f, 60, 70)) * 0.8);
+    drawText("DAY", 8, 540, 430, P.gold, seg(f, 122, 132) * (1 - seg(f, 144, 154)) * 0.8);
+    const fade = Math.max(seg(f, 158, 168), 1 - seg(f, 0, 8));
+    if (fade > 0.02)
+      for (let gy = 0;gy < GH; gy++)
+        for (let gx = 0;gx < GW; gx++)
+          px(gx, gy, P.base, fade);
+  }
+});
+
+</script>
+</body>
+</html>
